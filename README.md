@@ -46,21 +46,19 @@ Bridge 只负责把模型工具、当前会话和用户看到的 Pencil 画布�
 ## 目录结构
 
 ```text
-packages/pen-dev-bridge/
-  lib/index.js              依赖解析与三个运行边界的启动编排
-  lib/headless-runtime.js   官方 CLI/MCP 引擎生命周期
-  lib/model-tools.js        7 个核心模型工具与截图附件输出
-  lib/canvas-host.js        会话绑定、文档保存、editor IPC 路由
-  lib/canvas-transport.js   请求队列、长轮询、取消和响应配对
-  lib/editor-assets.js      官方 editor dist 定位、注入与静态响应
-  lib/ipc-binary.js         浏览器 IPC 中 ArrayBuffer 的无损传输
-  lib/session-store.js      Browser/CLI 登录态复用与安全落盘
-  lib/workspace-resources.js 图片导入、生成图、文件监听与设计库
-  lib/workspace-path.js     session 工作区与路径边界
-  lib/legacy-tools.js       可选的一次性 CLI 工具
-  lib/client.js             Harness Browser 分屏/浮动画布
-bundles/pen-dev-bridge-bundle/
-  cordis.patch.yml          Host 服务注入
+lib/index.js              依赖解析与三个运行边界的启动编排
+lib/headless-runtime.js   官方 CLI/MCP 引擎生命周期
+lib/model-tools.js        7 个核心模型工具与截图附件输出
+lib/canvas-host.js        会话绑定、文档保存、editor IPC 路由
+lib/canvas-transport.js   请求队列、长轮询、取消和响应配对
+lib/editor-assets.js      官方 editor dist 定位、注入与静态响应
+lib/ipc-binary.js         浏览器 IPC 中 ArrayBuffer 的无损传输
+lib/session-store.js      Browser/CLI 登录态复用与安全落盘
+lib/workspace-resources.js 图片导入、生成图、文件监听与设计库
+lib/workspace-path.js     session 工作区与路径边界
+lib/legacy-tools.js       可选的一次性 CLI 工具
+lib/client.js             Harness Browser 分屏/浮动画布
+cordis.patch.yml          DSH Bundle 层与 Host 服务注入
 profiles/pen-dev-bridge-template/
   package.json              开发用示例 profile
 tests/
@@ -73,18 +71,21 @@ scripts/verify.cjs          包结构和关键约束检查
 
 ## 当前安装方式
 
-目前是测试版开发安装，还不是可发布的一键插件：三个 package 都是 `private`，Bundle 与示例
-profile 使用仓库内的相对 `file:` 依赖；把 profile 目录单独复制出去会破坏这些路径。
+目前是测试版开发安装：仓库根目录已经收敛为唯一的 DSH Bundle/npm 包，Host、Client、patch 和
+官方 CLI 依赖由同一个 manifest 管理；示例 profile 仍使用仓库内的 `file:` 依赖，仅用于开发。
+正式包继续保留 `private: true`，直到 npm 名称、仓库元数据和 pen.dev 授权边界确认。
 
 在本仓库测试时，先准备官方 editor bundle：
 
 1. 从 pen.dev 官方版本接口取得 `editor-bundle-v0.1.94.zip` 并解压。
 2. 将 `DSH_PEN_EDITOR_DIR` 指向解压目录中的 `out`（该目录内应有 `index.html`）。
-3. 在目标 DSH profile 中以绝对 `file:` 路径安装本仓库的
-   `bundles/pen-dev-bridge-bundle`，并把 `pen-dev-bridge-bundle` 加入
-   `dsh.profile.bundles`。
-4. 重新安装 profile 依赖并重启 DSH。Bundle 会继续拉入本仓库 Bridge，Bridge 再安装固定版本
-   的官方 `@pen.dev/cli`。
+3. 把仓库根目录作为本地 Bundle 安装到目标 DSH profile：
+
+   ```bash
+   dsh plugin --profile web add link:/absolute/path/to/pen-dev-bridge
+   ```
+
+4. 重启 DSH。该 Bundle 会安装固定版本的官方 `@pen.dev/cli`，并同时加载 Host 和 Browser Client。
 
 也可以直接在仓库内安装示例 profile 的依赖进行开发验证，但不要把下面命令理解为发行安装器：
 
@@ -93,7 +94,7 @@ cd profiles/pen-dev-bridge-template
 pnpm install
 ```
 
-后续正式安装器应完成四件事：安装 Bridge/Bundle、安装固定版本官方 CLI、从官方地址下载并
+后续正式安装器应完成三件事：安装 Bridge Bundle（依赖会安装固定版本官方 CLI）、从官方地址下载并
 校验 editor bundle、修改目标 profile 配置。editor bundle 是否可随插件再分发，需要先确认
 pen.dev 的授权，因此目前不会把官方 dist 直接提交进本仓库。
 
@@ -143,3 +144,7 @@ canvas 路径没有启动 headless 子进程。`workspace-resources.test.mjs` �
 测试不依赖本机已经安装的 editor bundle，并在 CI 中覆盖 Node 22/24 的 macOS 与 Linux。正式发布
 仍应另外从生成的 npm tarball 安装到一个全新 DSH profile；在确认 npm scope 和 pen.dev 官方资源
 使用边界之前，发布包继续保持 `private` 且不包含任何 CLI/editor 官方文件。
+
+发布准备、人工授权门槛、tarball 冒烟测试与回滚步骤见
+[`docs/RELEASING.md`](docs/RELEASING.md)。本项目使用 MIT 许可；官方 CLI/editor 不属于该许可，
+详见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。

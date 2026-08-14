@@ -3,8 +3,8 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { decodeIpcBinary, encodeIpcBinary } from '../packages/pen-dev-bridge/lib/ipc-binary.js'
-import { createWorkspaceResources } from '../packages/pen-dev-bridge/lib/workspace-resources.js'
+import { decodeIpcBinary, encodeIpcBinary } from '../lib/ipc-binary.js'
+import { createWorkspaceResources } from '../lib/workspace-resources.js'
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pen-workspace-resources-'))
 const workspace = path.join(root, 'workspace')

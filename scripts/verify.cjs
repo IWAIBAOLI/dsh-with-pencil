@@ -4,8 +4,7 @@
  *
  * Checks:
  *  - every package.json is valid JSON with the right dsh shape
- *  - both cordis.patch.yml files parse and the bundle patch inserts the
- *    package declared in the bundle's dependencies
+ *  - the bundle patch parses and inserts this package
  *  - the plugin entry is syntactically valid JavaScript (ESM)
  *  - tool parameters use the DSH property-map schema DSL
  *  - the profile template lists dsh-base + the bundle
@@ -30,8 +29,7 @@ console.log('pen-dev-bridge static verification\n')
 // 1. package.json files
 console.log('[1] package.json files')
 const packageFiles = [
-  'packages/pen-dev-bridge/package.json',
-  'bundles/pen-dev-bridge-bundle/package.json',
+  'package.json',
   'profiles/pen-dev-bridge-template/package.json',
 ]
 const packageVersions = []
@@ -45,10 +43,10 @@ for (const rel of packageFiles) {
     fail(`${rel}: ${err.message}`)
   }
 }
-if (new Set(packageVersions).size !== 1) fail('package, bundle, and profile versions must match')
+if (new Set(packageVersions).size !== 1) fail('package and profile versions must match')
 else ok(`package versions aligned at ${packageVersions[0]}`)
 try {
-  const bridge = readJson('packages/pen-dev-bridge/package.json')
+  const bridge = readJson('package.json')
   if (bridge.dependencies?.['@pen.dev/cli'] !== '0.3.0') {
     fail('@pen.dev/cli must stay pinned to schema-2.14-compatible version 0.3.0')
   } else ok('@pen.dev/cli is pinned to schema-2.14-compatible version 0.3.0')
@@ -57,13 +55,18 @@ try {
 // 2. bundle structure
 console.log('[2] bundle structure')
 try {
-  const bundle = readJson('bundles/pen-dev-bridge-bundle/package.json')
+  const bundle = readJson('package.json')
   if (!bundle.dsh || !bundle.dsh.bundle || bundle.dsh.bundle.patch !== './cordis.patch.yml') {
     fail('bundle package.json must declare dsh.bundle.patch -> ./cordis.patch.yml')
   } else ok('bundle declares dsh.bundle.patch')
-  if (!bundle.dependencies || !bundle.dependencies['pen-dev-bridge']) {
-    fail('bundle must depend on pen-dev-bridge')
-  } else ok('bundle depends on pen-dev-bridge')
+  if (bundle.name !== 'pen-dev-bridge') fail('bundle package name must be pen-dev-bridge')
+  else ok('bundle and Host share one installable package')
+  if (!bundle.files?.includes('lib') || !bundle.files?.includes('cordis.patch.yml') || !bundle.files?.includes('THIRD_PARTY_NOTICES.md')) {
+    fail('bundle files allowlist must include runtime code, patch, and third-party notices')
+  } else ok('bundle has an explicit release files allowlist')
+  if (fs.existsSync(path.join(root, 'bundles')) || fs.existsSync(path.join(root, 'packages'))) {
+    fail('legacy wrapper package directories must not return')
+  } else ok('legacy wrapper package directories are absent')
 } catch (err) { fail('bundle: ' + err.message) }
 
 // 3. YAML patches
@@ -91,12 +94,12 @@ const insertedRows = (rel) => {
   return rows
 }
 try {
-  parseYaml('bundles/pen-dev-bridge-bundle/cordis.patch.yml')
-  const rows = insertedRows('bundles/pen-dev-bridge-bundle/cordis.patch.yml')
+  parseYaml('cordis.patch.yml')
+  const rows = insertedRows('cordis.patch.yml')
   if (!rows.some((row) => row.id === 'pen-dev-bridge' && row.name === 'pen-dev-bridge')) {
     fail('bundle patch must insert { id: pen-dev-bridge, name: pen-dev-bridge }')
   } else ok('bundle patch inserts pen-dev-bridge row')
-  const patch = patchText('bundles/pen-dev-bridge-bundle/cordis.patch.yml')
+  const patch = patchText('cordis.patch.yml')
   if (!patch.includes("inject: ['tools', 'subprocess', 'sandboxPolicy', 'webServer', 'sessions', 'attachments', 'systemPrompt']") && !patch.includes('inject: ["tools", "subprocess", "sandboxPolicy", "webServer", "sessions", "attachments", "systemPrompt"]')) {
     fail('bundle patch row must inject tool, process, web, session, attachment, and system-prompt services')
   } else ok('bundle patch row injects tool, process, web, session, attachment, and system-prompt services')
@@ -120,7 +123,7 @@ let sessionStoreSource = ''
 let ipcBinarySource = ''
 let workspaceResourcesSource = ''
 try {
-  const pluginPath = path.join(root, 'packages/pen-dev-bridge/lib/index.js')
+  const pluginPath = path.join(root, 'lib/index.js')
   execFileSync(process.execPath, ['--check', pluginPath], { stdio: 'pipe' })
   pluginSource = fs.readFileSync(pluginPath, 'utf8')
   ok('lib/index.js parses as ESM')
@@ -128,7 +131,7 @@ try {
   fail('lib/index.js: ' + (err.stderr ? err.stderr.toString() : err.message))
 }
 try {
-  const workspacePath = path.join(root, 'packages/pen-dev-bridge/lib/workspace-path.js')
+  const workspacePath = path.join(root, 'lib/workspace-path.js')
   execFileSync(process.execPath, ['--check', workspacePath], { stdio: 'pipe' })
   workspacePathSource = fs.readFileSync(workspacePath, 'utf8')
   ok('lib/workspace-path.js parses as ESM')
@@ -136,7 +139,7 @@ try {
   fail('lib/workspace-path.js: ' + (err.stderr ? err.stderr.toString() : err.message))
 }
 try {
-  const headlessPath = path.join(root, 'packages/pen-dev-bridge/lib/headless-runtime.js')
+  const headlessPath = path.join(root, 'lib/headless-runtime.js')
   execFileSync(process.execPath, ['--check', headlessPath], { stdio: 'pipe' })
   headlessSource = fs.readFileSync(headlessPath, 'utf8')
   ok('lib/headless-runtime.js parses as ESM')
@@ -144,7 +147,7 @@ try {
   fail('lib/headless-runtime.js: ' + (err.stderr ? err.stderr.toString() : err.message))
 }
 try {
-  execFileSync(process.execPath, ['--check', path.join(root, 'packages/pen-dev-bridge/lib/legacy-tools.js')], { stdio: 'pipe' })
+  execFileSync(process.execPath, ['--check', path.join(root, 'lib/legacy-tools.js')], { stdio: 'pipe' })
   ok('lib/legacy-tools.js parses as ESM')
 } catch (err) {
   fail('lib/legacy-tools.js: ' + (err.stderr ? err.stderr.toString() : err.message))
@@ -159,7 +162,7 @@ for (const [name, assign] of [
   ['workspace-resources.js', (source) => { workspaceResourcesSource = source }],
 ]) {
   try {
-    const modulePath = path.join(root, 'packages/pen-dev-bridge/lib', name)
+    const modulePath = path.join(root, 'lib', name)
     execFileSync(process.execPath, ['--check', modulePath], { stdio: 'pipe' })
     assign(fs.readFileSync(modulePath, 'utf8'))
     ok(`lib/${name} parses as ESM`)
@@ -168,7 +171,7 @@ for (const [name, assign] of [
   }
 }
 try {
-  execFileSync(process.execPath, ['--check', path.join(root, 'packages/pen-dev-bridge/lib/client.js')], { stdio: 'pipe' })
+  execFileSync(process.execPath, ['--check', path.join(root, 'lib/client.js')], { stdio: 'pipe' })
   ok('lib/client.js parses (browser bundle)')
 } catch (err) {
   fail('lib/client.js: ' + (err.stderr ? err.stderr.toString() : err.message))
@@ -189,13 +192,13 @@ if (modelToolsSource.includes("{ type: 'object', additionalProperties: true, pro
 // 4b. browser-half declaration (dsh.client + exports["./client"])
 console.log('[4b] browser-half declaration')
 try {
-  const pkg = readJson('packages/pen-dev-bridge/package.json')
+  const pkg = readJson('package.json')
   const decl = pkg.dsh && pkg.dsh.client
   if (!decl || decl.platform !== 'web') fail('pen-dev-bridge must declare dsh.client.platform: web')
   else ok('dsh.client.platform = web')
   if (!pkg.exports || pkg.exports['./client'] !== './lib/client.js') fail('package must export "./client" -> ./lib/client.js')
   else ok('exports["./client"] -> lib/client.js')
-  const client = fs.readFileSync(path.join(root, 'packages/pen-dev-bridge/lib/client.js'), 'utf8')
+  const client = fs.readFileSync(path.join(root, 'lib/client.js'), 'utf8')
   if (!client.startsWith('window.__ModuleLoader__.load({')) fail('client bundle must start with the __ModuleLoader__.load wrap')
   else ok('client bundle wrapped for the web loader')
   if (client.includes('store.setOpen(true)')) fail('client must not auto-open the canvas during plugin activation')
@@ -314,7 +317,8 @@ try {
   const bundles = profile.dsh && profile.dsh.profile && profile.dsh.profile.bundles
   if (!Array.isArray(bundles) || !bundles.includes('@deepseek-ai/dsh-base')) fail('profile must list @deepseek-ai/dsh-base')
   if (!Array.isArray(bundles) || !bundles.includes('@deepseek-ai/dsh-web-app')) fail('profile must list @deepseek-ai/dsh-web-app')
-  if (!Array.isArray(bundles) || !bundles.includes('pen-dev-bridge-bundle')) fail('profile must list pen-dev-bridge-bundle')
+  if (!Array.isArray(bundles) || !bundles.includes('pen-dev-bridge')) fail('profile must list pen-dev-bridge')
+  if (profile.dependencies?.['pen-dev-bridge'] !== 'file:../..') fail('profile fixture must install the repository root package')
   ok(`bundles = [${bundles.join(', ')}]`)
 } catch (err) { fail('profile: ' + err.message) }
 

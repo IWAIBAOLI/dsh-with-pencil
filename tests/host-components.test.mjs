@@ -2,8 +2,8 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { createEditorAssets } from '../packages/pen-dev-bridge/lib/editor-assets.js'
-import { createSessionStore } from '../packages/pen-dev-bridge/lib/session-store.js'
+import { createEditorAssets } from '../lib/editor-assets.js'
+import { createSessionStore } from '../lib/session-store.js'
 
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'pen-host-components-'))
 const editorDir = path.join(temporary, 'editor-out')

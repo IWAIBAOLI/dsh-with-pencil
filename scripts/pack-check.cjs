@@ -25,7 +25,15 @@ function dryRun(relative, required, allowed) {
   console.log(relative + ': ' + result.filename + ', ' + result.entryCount + ' files, no bundled dependencies')
 }
 
-dryRun('packages/pen-dev-bridge', ['package.json', 'lib/index.js', 'lib/client.js'], /^(package\.json|lib\/[a-z0-9-]+\.js)$/)
-dryRun('bundles/pen-dev-bridge-bundle', ['package.json', 'cordis.patch.yml'], /^(package\.json|cordis\.patch\.yml)$/)
+dryRun('.', [
+  'package.json',
+  'lib/index.js',
+  'lib/client.js',
+  'cordis.patch.yml',
+  'README.md',
+  'LICENSE',
+  'THIRD_PARTY_NOTICES.md',
+  'CHANGELOG.md',
+], /^(package\.json|cordis\.patch\.yml|README\.md|LICENSE|THIRD_PARTY_NOTICES\.md|CHANGELOG\.md|lib\/[a-z0-9-]+\.js)$/)
 
 console.log('npm package contents: ok')

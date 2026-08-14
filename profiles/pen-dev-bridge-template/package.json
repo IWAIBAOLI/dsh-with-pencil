@@ -1,19 +1,19 @@
 {
   "name": "pen-dev-bridge-profile",
-  "version": "0.5.0",
+  "version": "0.5.0-beta.1",
   "private": true,
   "description": "Development DSH Web profile for pen-dev-bridge. Its repository-relative file dependencies require this source tree.",
   "dependencies": {
     "@deepseek-ai/dsh-base": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-web-app": "^0.1.0-rc.6",
-    "pen-dev-bridge-bundle": "file:../../bundles/pen-dev-bridge-bundle"
+    "pen-dev-bridge": "file:../.."
   },
   "dsh": {
     "profile": {
       "bundles": [
         "@deepseek-ai/dsh-base",
         "@deepseek-ai/dsh-web-app",
-        "pen-dev-bridge-bundle"
+        "pen-dev-bridge"
       ]
     }
   }

@@ -1,13 +1,58 @@
 {
-  "name": "pen-dev-bridge-workspace",
+  "name": "pen-dev-bridge",
   "private": true,
-  "version": "0.5.0",
-  "description": "Development workspace for the DeepSeek Harness pen.dev bridge.",
+  "version": "0.5.0-beta.1",
+  "description": "Session-bound DeepSeek Harness bridge to pen.dev with official Pencil MCP tools and an on-demand browser canvas.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
+    "CHANGELOG.md"
+  ],
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "pencil",
+    "pen.dev",
+    "design",
+    "mcp"
+  ],
   "engines": {
     "node": ">=22.15.0"
   },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ]
+    }
+  },
+  "dependencies": {
+    "@pen.dev/cli": "0.3.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-tools": "^0.1.0-rc.6",
+    "react": "^18.2.0"
+  },
   "scripts": {
     "pack:check": "node scripts/pack-check.cjs",
+    "release:check": "npm test && node scripts/release-check.cjs",
     "verify": "node scripts/verify.cjs",
     "test": "node scripts/test-all.cjs"
   }

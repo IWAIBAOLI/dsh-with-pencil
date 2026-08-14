@@ -17,7 +17,7 @@ registerHooks({
 process.env.DSH_PEN_CLI_BIN = '/test/pen-cli.mjs'
 process.env.DSH_PEN_MCP_BIN = '/test/pen-mcp'
 
-const bridgeUrl = new URL('../packages/pen-dev-bridge/lib/index.js', import.meta.url)
+const bridgeUrl = new URL('../lib/index.js', import.meta.url)
 const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'pen-live-canvas-'))
 const editorDir = path.join(workspace, 'editor-out')
 fs.mkdirSync(editorDir, { recursive: true })

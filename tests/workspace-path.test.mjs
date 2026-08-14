@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { resolveWorkspacePath } from '../packages/pen-dev-bridge/lib/workspace-path.js'
+import { resolveWorkspacePath } from '../lib/workspace-path.js'
 
 const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'pen-workspace-path-'))
 const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'pen-workspace-outside-'))

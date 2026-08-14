@@ -1,6 +1,6 @@
-# pen-dev-bridge-bundle patch layer.
+# pen-dev-bridge bundle patch layer.
 #
-# Applied as ONE insert over the profile root after the base bundle layers.
+# Applied as one insert over the profile root after the base bundle layers.
 # Adds the pen-dev-bridge HOST plugin row: a real Node Cordis plugin that
 # spawns pen.dev's local headless editor engine (from @pen.dev/cli) and
 # registers 7 core pencil_mcp_* model tools (with 5 one-shot CLI helpers
