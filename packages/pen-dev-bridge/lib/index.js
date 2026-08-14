@@ -243,7 +243,7 @@ export default {
         stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n')
       })
       const init = async () => {
-        await call('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'dsh-pen-dev-bridge', version: '0.3.1' } })
+        await call('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'dsh-pen-dev-bridge', version: '0.3.2' } })
         stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n')
       }
       const close = () => { try { handle.terminate() } catch (err) { /* ignore */ } }
@@ -545,6 +545,9 @@ export default {
       const sessionCli = path.join(os.homedir(), '.pencil', 'session-cli.json')
       const uiState = { email: '', token: '' }
       const bindings = new Map()
+      // This must match CURRENT_SCHEMA_VERSION in the bundled pen-editor assets.
+      // The editor rejects every other version instead of migrating it in place.
+      const EDITOR_SCHEMA_VERSION = '2.14'
       const MIME = {
         html: 'text/html', js: 'text/javascript', mjs: 'text/javascript', css: 'text/css',
         json: 'application/json', map: 'application/json', wasm: 'application/wasm',
@@ -646,6 +649,46 @@ export default {
         }
         return path.resolve(target)
       }
+      async function writeFileAtomic(target, content) {
+        await fsp.mkdir(path.dirname(target), { recursive: true })
+        const temporary = target + '.penhost-' + randomUUID() + '.tmp'
+        try {
+          await fsp.writeFile(temporary, content)
+          await fsp.rename(temporary, target)
+        } finally {
+          try { await fsp.unlink(temporary) } catch (err) { /* rename already removed it */ }
+        }
+      }
+      async function queueCurrentFile(binding) {
+        const target = binding.currentFile
+        let content
+        try {
+          content = await fsp.readFile(target, 'utf8')
+          const document = JSON.parse(content)
+          if (!document || document.version !== EDITOR_SCHEMA_VERSION) {
+            throw new Error('Unsupported .pen format ' + (document && document.version ? document.version : 'unknown') + '; this editor requires ' + EDITOR_SCHEMA_VERSION)
+          }
+        } catch (err) {
+          if (!err || err.code !== 'ENOENT') {
+            binding.loadedFile = null
+            binding.autosaveAfter = Infinity
+            hostMsgSeq += 1
+            binding.queue.push({
+              id: 'host-' + hostMsgSeq + '-' + Date.now(), type: 'notification', method: 'file-error',
+              payload: { filePath: target, errorMessage: err && err.message ? err.message : String(err) },
+            })
+            return
+          }
+          content = JSON.stringify({ version: EDITOR_SCHEMA_VERSION, children: [], fileToken: randomUUID() })
+        }
+        binding.loadedFile = target
+        binding.autosaveAfter = Date.now() + 6000
+        hostMsgSeq += 1
+        binding.queue.push({
+          id: 'host-' + hostMsgSeq + '-' + Date.now(), type: 'notification', method: 'file-update',
+          payload: { fileURI: 'file://' + target, content, zoomToFit: true, isDirty: false, displayName: path.basename(target) },
+        })
+      }
       function injectBootstrap(html, binding) {
         const bindingKey = JSON.stringify(binding.key)
         const penFile = JSON.stringify(binding.currentFile)
@@ -654,10 +697,20 @@ export default {
 var __penBinding = ${bindingKey};
 var __penFile = ${penFile};
 function __penHostUrl(path) { return path + '?binding=' + encodeURIComponent(__penBinding); }
+function __penDecodeResponse(resp) {
+  var encoded = resp && resp.payload && resp.payload.__penBinaryBase64;
+  if (typeof encoded !== 'string') return resp;
+  var raw = atob(encoded);
+  var bytes = new Uint8Array(raw.length);
+  for (var i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+  resp.payload = bytes.buffer;
+  return resp;
+}
 window.vscodeapi = {
   postMessage: function (msg) {
     fetch(__penHostUrl('/pen-host/ipc'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(msg) })
       .then(function (r) { return r.json() })
+      .then(__penDecodeResponse)
       .then(function (resp) { window.postMessage(resp, '*') })
       .catch(function (err) { console.error('[penhost] ipc error', err) })
   },
@@ -710,6 +763,8 @@ setInterval(function () {
 
       const autosaveTimer = setInterval(() => {
         for (const binding of bindings.values()) {
+          if (binding.loadedFile !== binding.currentFile) continue
+          if (Date.now() < binding.autosaveAfter) continue
           if (binding.queue.length >= 8) continue
           hostMsgSeq += 1
           binding.queue.push({ id: 'host-' + hostMsgSeq + '-' + Date.now(), type: 'request', method: 'save-document', payload: {} })
@@ -789,7 +844,7 @@ setInterval(function () {
         let currentFile
         try { currentFile = defaultFile(workspace) }
         catch (err) { res.writeHead(409); res.end(err.message); return }
-        const binding = { key, sessionId, workspace, currentFile, queue: [] }
+        const binding = { key, sessionId, workspace, currentFile, loadedFile: null, autosaveAfter: Infinity, queue: [] }
         bindings.set(key, binding)
         res.writeHead(200, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ binding: key, workspace, file: binding.currentFile }))
@@ -837,6 +892,9 @@ setInterval(function () {
           res.writeHead(400); res.end('canvas file must end in .pen'); return
         }
         binding.currentFile = target
+        binding.loadedFile = null
+        binding.autosaveAfter = Infinity
+        binding.queue = []
         res.writeHead(200, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ file: target }))
       }
@@ -866,8 +924,16 @@ setInterval(function () {
         try { msg = await readBody(req) }
         catch (err) { res.writeHead(400); res.end('bad json'); return }
         if (msg.type === 'notification') {
-          if (msg.method === 'set-current-file') {
-            try { binding.currentFile = insideWorkspace(binding, msg.payload && msg.payload.uri) }
+          if (msg.method === 'initialized') {
+            await queueCurrentFile(binding)
+          } else if (msg.method === 'set-current-file') {
+            try {
+              const uri = typeof msg.payload === 'string' ? msg.payload : msg.payload && msg.payload.uri
+              binding.currentFile = insideWorkspace(binding, uri)
+              binding.loadedFile = null
+              binding.autosaveAfter = Infinity
+              binding.queue = []
+            }
             catch (err) { res.writeHead(403); res.end('forbidden'); return }
           } else if (msg.method === 'set-session') {
             if (msg.payload && msg.payload.token) {
@@ -876,11 +942,10 @@ setInterval(function () {
               persistState()
             }
           } else if (msg.method === 'save-resource') {
-            if (binding.currentFile && msg.payload && msg.payload.content !== undefined) {
+            if (binding.currentFile && binding.loadedFile === binding.currentFile && Date.now() >= binding.autosaveAfter && msg.payload && msg.payload.content !== undefined) {
               try {
                 const target = insideWorkspace(binding, binding.currentFile)
-                await fsp.mkdir(path.dirname(target), { recursive: true })
-                await fsp.writeFile(target, String(msg.payload.content))
+                await writeFileAtomic(target, String(msg.payload.content))
               } catch (err) { console.error('[pen-dev-bridge] save failed', err && err.message) }
             }
           }
@@ -900,13 +965,19 @@ setInterval(function () {
           case 'get-device-id': out = { deviceId: 'dsh-local' }; break
           case 'get-last-online-at': out = { lastOnlineAt: Date.now() }; break
           case 'read-file': {
-            try { out = { content: await fsp.readFile(insideWorkspace(binding, payload.uri), 'utf8') } }
-            catch (err) { out = { content: '' } }
+            let target
+            try {
+              target = insideWorkspace(binding, payload)
+              const content = await fsp.readFile(target)
+              out = { __penBinaryBase64: content.toString('base64') }
+            } catch (err) {
+              out = { __penBinaryBase64: '' }
+            }
             break
           }
           case 'stat-file': {
             try {
-              const st = await fsp.stat(insideWorkspace(binding, payload.uri))
+              const st = await fsp.stat(insideWorkspace(binding, payload))
               out = { exists: true, isFile: st.isFile() }
             } catch (err) { out = { exists: false, isFile: false } }
             break

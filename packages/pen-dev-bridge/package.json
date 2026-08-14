@@ -1,6 +1,6 @@
 {
   "name": "pen-dev-bridge",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Session-bound DeepSeek Harness bridge to pen.dev: official Pencil MCP tools, per-conversation headless engines, and an on-demand browser canvas (split or floating, with autosave).",
   "type": "module",
   "main": "lib/index.js",
@@ -19,7 +19,7 @@
     }
   },
   "dependencies": {
-    "@pen.dev/cli": "^0.3.2"
+    "@pen.dev/cli": "0.3.0"
   },
   "peerDependencies": {
     "@deepseek-ai/dsh-tools": "^0.1.0-rc.6",

@@ -47,6 +47,12 @@ for (const rel of packageFiles) {
 }
 if (new Set(packageVersions).size !== 1) fail('package, bundle, and profile versions must match')
 else ok(`package versions aligned at ${packageVersions[0]}`)
+try {
+  const bridge = readJson('packages/pen-dev-bridge/package.json')
+  if (bridge.dependencies?.['@pen.dev/cli'] !== '0.3.0') {
+    fail('@pen.dev/cli must stay pinned to schema-2.14-compatible version 0.3.0')
+  } else ok('@pen.dev/cli is pinned to schema-2.14-compatible version 0.3.0')
+} catch (err) { fail('bridge dependency versions: ' + err.message) }
 
 // 2. bundle structure
 console.log('[2] bundle structure')
@@ -177,6 +183,15 @@ if (!pluginSource.includes("path: '/pen-host/files'") || !pluginSource.includes(
 if (!pluginSource.includes("case 'get-session': out = sessionState()") || !pluginSource.includes('return { email: uiState.email, token: uiState.token }')) {
   fail('new conversation canvases must reuse profile-level email and token')
 } else ok('new conversation canvases reuse profile-level email and token')
+if (!pluginSource.includes('function __penDecodeResponse(resp)') || !pluginSource.includes("out = { __penBinaryBase64: content.toString('base64') }") || pluginSource.includes('insideWorkspace(binding, payload.uri)')) {
+  fail('editor file IPC must transport raw URI payloads and binary file content')
+} else ok('editor file IPC transports raw URI payloads and binary file content')
+if (!pluginSource.includes("const EDITOR_SCHEMA_VERSION = '2.14'") || !pluginSource.includes('document.version !== EDITOR_SCHEMA_VERSION') || !pluginSource.includes('async function queueCurrentFile(binding)') || !pluginSource.includes("msg.method === 'initialized'") || !pluginSource.includes("method: 'file-update'")) {
+  fail('host must push the selected document after the editor initializes')
+} else ok('host pushes the selected document after editor initialization')
+if (!pluginSource.includes('binding.loadedFile !== binding.currentFile') || !pluginSource.includes('binding.loadedFile === binding.currentFile && Date.now() >= binding.autosaveAfter') || !pluginSource.includes('binding.queue = []') || !pluginSource.includes('writeFileAtomic')) {
+  fail('autosave must wait for a successful file load and write atomically')
+} else ok('autosave waits for a successful file load and writes atomically')
 if (!pluginSource.includes('path escapes the bound session workspace')) {
   fail('canvas file IPC must enforce the bound workspace boundary')
 } else ok('canvas file IPC enforces the bound workspace boundary')

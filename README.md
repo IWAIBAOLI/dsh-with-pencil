@@ -60,6 +60,9 @@ dsh --profile pen-dev-bridge
    `pencil_mcp_open` → `get_app_state`（学 schema）→ `execute`（建节点）→
    `get_screenshot`（验证）→ `export_html` / `export_nodes`（落地代码/图片）。
 
+插件将 `@pen.dev/cli` 精确锁定在 `0.3.0`：它与官方公开的 editor `0.1.94` 都使用 `.pen`
+schema `2.14`。升级任一侧前必须先确认两者 schema 一致，否则新文件只能被其中一侧打开。
+
 ## 引擎坐席
 
 - 默认：插件自持 **headless 引擎**（`pen interactive --out <file>`，stdin 保持打开，
@@ -92,6 +95,10 @@ dsh --profile pen-dev-bridge
 - 每 6 秒宿主向编辑器推 `save-document`，编辑器回 `save-resource` 内容落盘到
   当前 `.pen` 文件；会话 token 读 `~/.pencil/session-cli.json`，浏览器登录态存于
   `~/.dsh/pen-dev-bridge/state.json` 并由同一 profile 的所有会话共享，不会污染项目工作区。
+- 编辑器初始化后，宿主会主动推送当前文件的 `file-update`；`.pen` 内容通过二进制 IPC 读取；
+  推送前会校验文件版本与内置编辑器一致，自动保存只有在当前文件成功通过校验（或确认是新文件）后才
+  启用；切换文件时会丢弃旧保存队列并设置冷却闸门，落盘使用同目录临时文件原子替换，避免旧画布、
+  空白编辑器或中断写入覆盖已有设计。
 - 分屏打开期间产品「详情」列被隐藏（`visibility: hidden`），不会叠在画布下面。
 
 ## 验证
