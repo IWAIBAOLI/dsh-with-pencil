@@ -1,0 +1,17 @@
+# pen-dev-bridge-bundle patch layer.
+#
+# Applied as ONE insert over the profile root after the base bundle layers.
+# Adds the pen-dev-bridge HOST plugin row: a real Node Cordis plugin that
+# spawns pen.dev's local headless editor engine (from @pen.dev/cli) and
+# registers the 12 pencil_* model tools (official Pencil MCP tools +
+# one-shot pen CLI helpers), plus the browser-side canvas seat (the package's
+# dsh.client declaration is picked up by client-modules automatically).
+#
+# `inject` authorizes the direct `ctx.tools` access and makes the Loader wait
+# for the tool, process, policy, and Web route services before applying. This
+# keeps both the model tools and browser canvas available on first boot.
+
+- insert:
+    - id: pen-dev-bridge
+      name: 'pen-dev-bridge'
+      inject: ['tools', 'subprocess', 'sandboxPolicy', 'webServer']

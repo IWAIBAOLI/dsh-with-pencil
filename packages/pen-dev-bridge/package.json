@@ -1,0 +1,30 @@
+{
+  "name": "pen-dev-bridge",
+  "version": "0.1.1",
+  "description": "DeepSeek Harness bridge to pen.dev (pencil.dev): official Pencil MCP tools + local headless engine, with DeepSeek as the design agent, plus a browser-side canvas seat (50% split screen or floating editor window with autosave).",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ]
+    }
+  },
+  "dependencies": {
+    "@pen.dev/cli": "^0.3.2"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-tools": "^0.1.0-rc.6",
+    "react": "^18.2.0"
+  },
+  "license": "MIT",
+  "private": true
+}
