@@ -62,13 +62,17 @@ dsh --profile pen-dev-bridge
 
 插件将 `@pen.dev/cli` 精确锁定在 `0.3.0`：它与官方公开的 editor `0.1.94` 都使用 `.pen`
 schema `2.14`。升级任一侧前必须先确认两者 schema 一致，否则新文件只能被其中一侧打开。
+Bridge 会读取 MCP `tools/list`，把现行 `get_app_state` / `execute` 自动映射到 0.3.0 的
+`get_editor_state` / `batch_design`，上层 `pencil_mcp_*` 工具名保持不变。
 
 ## 引擎坐席
 
 - 默认：插件自持 **headless 引擎**（`pen interactive --out <file>`，stdin 保持打开，
   每次 `execute` 后自动 `save()` 落盘）。
+- 官方 CLI 固定使用全局 `pencil-cli.sock`，因此 Bridge 会串行执行 MCP 调用，并在会话文件间
+  安全切换唯一的活动引擎；启动前只会删除确认无人监听的残留 socket。
 - 备选：检测到运行中的 **Pencil Desktop / IDE（Antigravity 等）** 时自动连 `--app <name>`
-  （读 `~/.pencil/apps`），可用 `DSH_PEN_MCP_APP` 覆盖。
+  （同时校验 `~/.pencil/apps` 中的 PID 与 socket，忽略残留记录），可用 `DSH_PEN_MCP_APP` 覆盖。
 
 ## 环境变量
 

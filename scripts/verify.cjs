@@ -192,6 +192,15 @@ if (!pluginSource.includes("const EDITOR_SCHEMA_VERSION = '2.14'") || !pluginSou
 if (!pluginSource.includes('binding.loadedFile !== binding.currentFile') || !pluginSource.includes('binding.loadedFile === binding.currentFile && Date.now() >= binding.autosaveAfter') || !pluginSource.includes('binding.queue = []') || !pluginSource.includes('writeFileAtomic')) {
   fail('autosave must wait for a successful file load and write atomically')
 } else ok('autosave waits for a successful file load and writes atomically')
+if (!pluginSource.includes("get_app_state: ['get_app_state', 'get_editor_state']") || !pluginSource.includes("execute: ['execute', 'batch_design']") || !pluginSource.includes("await call('tools/list', {})")) {
+  fail('MCP calls must map the schema-compatible CLI legacy tool names from tools/list')
+} else ok('MCP calls map legacy tool names discovered through tools/list')
+if (!pluginSource.includes('function cliSocketActive()') || !pluginSource.includes('async function cleanupStaleCliSocket()') || !pluginSource.includes('let mcpSerial = Promise.resolve()')) {
+  fail('headless MCP calls must serialize and clean only inactive CLI sockets')
+} else ok('headless MCP calls serialize and clean inactive CLI sockets')
+if (!pluginSource.includes('process.kill(pid, 0)') || !pluginSource.includes('No pen.dev engine is bound to this conversation')) {
+  fail('external editor detection must ignore stale app records and request an explicit open')
+} else ok('stale external editor records are ignored with an explicit open hint')
 if (!pluginSource.includes('path escapes the bound session workspace')) {
   fail('canvas file IPC must enforce the bound workspace boundary')
 } else ok('canvas file IPC enforces the bound workspace boundary')

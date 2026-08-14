@@ -14,6 +14,7 @@ import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
+import net from 'node:net'
 import { randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { defineTool } from '@deepseek-ai/dsh-tools'
@@ -84,9 +85,13 @@ export default {
       return path.isAbsolute(s) ? s : path.join(workspace, s)
     }
 
-    // One engine per conversation prevents concurrent sessions from changing
-    // each other's current document.
+    // Keep each conversation's selected file, but allow only one active
+    // headless process: the official CLI hardcodes the global `cli` socket.
+    // MCP calls are serialized and switch that process between session files.
     const engines = new Map()
+    const cliSocket = path.join(os.homedir(), '.pencil', 'socket', 'pencil-cli.sock')
+    let activeEngine = null
+    let mcpSerial = Promise.resolve()
     function engineFor(exec) {
       const workspace = workspaceForExec(exec)
       const key = String(exec && exec.agent && exec.agent.session && exec.agent.session.id || workspace)
@@ -97,18 +102,52 @@ export default {
       }
       return engine
     }
-    function stopEngine(engine) {
-      if (engine.handle) {
-        try { engine.handle.terminate() } catch (err) { /* ignore */ }
-        engine.handle = null
-        engine.file = null
-      }
+    function cliSocketActive() {
+      if (!fs.existsSync(cliSocket)) return Promise.resolve(false)
+      return new Promise((resolve) => {
+        const socket = net.createConnection(cliSocket)
+        let settled = false
+        const finish = (active) => {
+          if (settled) return
+          settled = true
+          try { socket.destroy() } catch (err) { /* ignore */ }
+          resolve(active)
+        }
+        socket.once('connect', () => finish(true))
+        socket.once('error', () => finish(false))
+        socket.setTimeout(400, () => finish(false))
+      })
     }
-    function ensureEngine(filePath, exec) {
+    async function cleanupStaleCliSocket() {
+      if (!fs.existsSync(cliSocket) || await cliSocketActive()) return false
+      try { await fsp.unlink(cliSocket); return true }
+      catch (err) { return false }
+    }
+    async function stopEngine(engine) {
+      const handle = engine && engine.handle
+      if (!handle) return
+      engine.handle = null
+      engine.file = null
+      if (activeEngine === engine) activeEngine = null
+      try { handle.terminate() } catch (err) { /* ignore */ }
+      try {
+        await Promise.race([
+          handle.done.catch(() => undefined),
+          new Promise((resolve) => setTimeout(resolve, 2500)),
+        ])
+      } catch (err) { /* ignore */ }
+      await cleanupStaleCliSocket()
+    }
+    async function ensureEngine(filePath, exec) {
       const engine = engineFor(exec)
       const target = absPath(filePath, engine.workspace)
       if (engine.handle && engine.file === target) return engine.ready
-      stopEngine(engine)
+      if (activeEngine && activeEngine !== engine) await stopEngine(activeEngine)
+      await stopEngine(engine)
+      await cleanupStaleCliSocket()
+      if (await cliSocketActive()) {
+        throw new Error('another pen.dev CLI engine is already using ' + cliSocket)
+      }
       engine.file = target
       // `--out` starts from an EMPTY canvas and never loads existing content;
       // on an existing file use `--in target --out target` so prior saves load.
@@ -125,6 +164,7 @@ export default {
         env: baseEnv,
       })
       engine.handle = handle
+      activeEngine = engine
       engine.ready = new Promise((resolve, reject) => {
         let out = ''
         let settled = false
@@ -144,13 +184,17 @@ export default {
         deadline.addEventListener('abort', onAbort)
         if (handle.stdout) handle.stdout.on('data', onData)
         handle.done.then(onExit, onExit)
-      }).catch((err) => { stopEngine(engine); throw err })
+      }).catch(async (err) => { await stopEngine(engine); throw err })
       handle.done.then(
         () => {
           if (engine.handle === handle) { engine.handle = null; engine.file = null }
+          if (activeEngine === engine) activeEngine = null
+          void cleanupStaleCliSocket()
         },
         () => {
           if (engine.handle === handle) { engine.handle = null; engine.file = null }
+          if (activeEngine === engine) activeEngine = null
+          void cleanupStaleCliSocket()
         },
       )
       return engine.ready
@@ -161,22 +205,25 @@ export default {
       }
     }
     ctx.effect(() => () => {
-      for (const engine of engines.values()) stopEngine(engine)
+      for (const engine of engines.values()) void stopEngine(engine)
       engines.clear()
     })
 
     // ---- detect an external pen.dev editor app name (desktop / IDE) ----
-    let appNameCache = null
     function detectApp(engine) {
-      if (engine && engine.handle) return 'cli'
-      if (appNameCache) return appNameCache
-      appNameCache = process.env.DSH_PEN_MCP_APP || 'desktop'
+      if (engine && engine.handle && activeEngine === engine) return 'cli'
+      if (process.env.DSH_PEN_MCP_APP) return process.env.DSH_PEN_MCP_APP
       try {
         const dir = path.join(os.homedir(), '.pencil', 'apps')
         const entries = fs.readdirSync(dir).filter((n) => n !== '.DS_Store')
-        if (entries.length) appNameCache = entries[0]
-      } catch (err) { /* keep fallback */ }
-      return appNameCache
+        for (const entry of entries) {
+          const pid = Number(fs.readFileSync(path.join(dir, entry), 'utf8').trim())
+          if (!Number.isInteger(pid) || pid <= 0) continue
+          try { process.kill(pid, 0) } catch (err) { continue }
+          if (fs.existsSync(path.join(os.homedir(), '.pencil', 'socket', 'pencil-' + entry + '.sock'))) return entry
+        }
+      } catch (err) { /* no live external editor */ }
+      return null
     }
 
     // ---- run the official pen CLI once ----
@@ -243,14 +290,32 @@ export default {
         stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n')
       })
       const init = async () => {
-        await call('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'dsh-pen-dev-bridge', version: '0.3.2' } })
+        await call('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'dsh-pen-dev-bridge', version: '0.3.3' } })
         stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n')
+        const listed = await call('tools/list', {})
+        const tools = listed && listed.result && Array.isArray(listed.result.tools) ? listed.result.tools : []
+        return new Map(tools.map((tool) => [tool.name, tool]))
       }
       const close = () => { try { handle.terminate() } catch (err) { /* ignore */ } }
       return { call, init, close, done: handle.done }
     }
 
-    async function runMcp(tool, args, opts) {
+    const mcpAliases = {
+      get_app_state: ['get_app_state', 'get_editor_state'],
+      execute: ['execute', 'batch_design'],
+    }
+    function adaptMcpArguments(requested, actual, args, spec, fileArg) {
+      if (actual === 'get_editor_state') return { include_schema: !!args.include_schema }
+      if (actual === 'batch_design') {
+        if (!args.input) throw new Error('CLI 0.3.0 batch_design requires input; editId patch retries are unavailable')
+        return { filePath: fileArg || args.filePath, input: args.input }
+      }
+      const adapted = { ...args }
+      const requiredFields = spec && spec.inputSchema && Array.isArray(spec.inputSchema.required) ? spec.inputSchema.required : Array()
+      if (fileArg && requiredFields.includes('filePath') && !adapted.filePath) adapted.filePath = fileArg
+      return adapted
+    }
+    async function runMcpNow(tool, args, opts) {
       const workspace = workspaceForExec(opts.exec)
       const engine = engineFor(opts.exec)
       let appName = detectApp(engine)
@@ -265,18 +330,27 @@ export default {
           return { ok: false, text: 'engine start failed: ' + (err && err.message ? err.message : String(err)) }
         }
       }
+      if (!appName) {
+        return { ok: false, text: 'No pen.dev engine is bound to this conversation. Call pencil_mcp_open with the target .pen file first.' }
+      }
       const client = mcpClient(appName, workspace)
       try {
-        await withSignal(client.init(), opts.signal)
+        const catalog = await withSignal(client.init(), opts.signal)
+        const candidates = mcpAliases[tool] || [tool]
+        const actualTool = candidates.find((name) => catalog.has(name))
+        if (!actualTool) {
+          return { ok: false, text: 'MCP tool unavailable: ' + tool + ' (server exposes: ' + Array.from(catalog.keys()).join(', ') + ')' }
+        }
+        const toolArgs = adaptMcpArguments(tool, actualTool, args || {}, catalog.get(actualTool), fileArg)
         const raced = Promise.race([
-          client.call('tools/call', { name: tool, arguments: args }),
+          client.call('tools/call', { name: actualTool, arguments: toolArgs }),
           client.done.then(() => { throw new Error('pencil MCP server exited before responding (is the pen.dev editor app running?)') }),
         ])
         const res = await withSignal(raced, opts.signal)
         if (res && res.error) {
           return { ok: false, text: 'MCP error: ' + String((res.error.message || JSON.stringify(res.error))).slice(0, 4000) }
         }
-        if (tool === 'execute' || tool === 'export_html' || tool === 'export_nodes') {
+        if (tool === 'execute' || actualTool === 'batch_design' || tool === 'export_html' || tool === 'export_nodes') {
           setTimeout(() => saveEngine(engine), 400)
         }
         const content = res && res.result && res.result.content
@@ -295,6 +369,14 @@ export default {
       } finally {
         client.close()
       }
+    }
+    function runMcp(tool, args, opts) {
+      const operation = mcpSerial.then(
+        () => runMcpNow(tool, args, opts),
+        () => runMcpNow(tool, args, opts),
+      )
+      mcpSerial = operation.then(() => undefined, () => undefined)
+      return operation
     }
 
     // ---- tool definitions ----
@@ -403,25 +485,16 @@ export default {
       async (args, exec) => {
         const filePath = String(args.filePath || '').trim()
         if (!filePath) return { ok: false, text: 'filePath is required' }
-        try {
-          await ensureEngine(filePath, exec)
-        } catch (err) {
-          return { ok: false, text: 'engine start failed: ' + (err && err.message ? err.message : String(err)) }
-        }
         const workspace = workspaceForExec(exec)
         const target = absPath(filePath, workspace)
-        const client = mcpClient('cli', workspace)
-        try {
-          await withSignal(client.init(), exec.signal)
-          const res = await withSignal(client.call('tools/call', { name: 'get_app_state', arguments: { filePath: target, include_schema: false, include_canvas_design: false, include_scripts_and_shaders: false } }), exec.signal)
-          const content = res && res.result && res.result.content
-          const text = Array.isArray(content) ? content.map((c) => (c && c.text != null ? c.text : '')).join('\n') : JSON.stringify(res && res.result)
-          return { ok: !(res && res.result && res.result.isError), text: 'Engine ready on ' + target + '.\n\n' + text.slice(0, 4000) }
-        } catch (err) {
-          return { ok: false, text: 'MCP call failed: ' + (err && err.message ? err.message : String(err)) }
-        } finally {
-          client.close()
-        }
+        const state = await runMcp('get_app_state', {
+          filePath: target,
+          include_schema: false,
+          include_canvas_design: false,
+          include_scripts_and_shaders: false,
+        }, { exec, filePath: target, signal: exec.signal })
+        if (!state.ok) return state
+        return { ok: true, text: 'Engine ready on ' + target + '.\n\n' + state.text.slice(0, 4000) }
       }, 60000)
 
     register('pencil_mcp_get_app_state', 'Official Pencil MCP tool: get the current state of the .pen canvas editor (document, selection, browser state). Works against the local headless engine once pencil_mcp_open has opened a file. Always start design sessions with this (include_schema true) to learn the .pen schema.',
@@ -455,7 +528,7 @@ export default {
         return runMcp('get_guidelines', a, { exec, signal: exec.signal })
       }, 120000)
 
-    register('pencil_mcp_execute', 'Official Pencil MCP tool: modify a .pen document by running a JavaScript snippet (Insert/Get/Set/Print etc., see get_app_state with include_schema for the schema). filePath is the .pen file. On failure, the server returns an editId — retry with {editId, edits:[{find, replace}]} instead of resending input. .pen files are encrypted; never read/write them with the fs tools. Changes are saved to the file after each successful call.',
+    register('pencil_mcp_execute', 'Official Pencil MCP tool: modify a .pen document by running a JavaScript snippet (Insert/Get/Set/Print etc., see get_app_state with include_schema for the schema). The bridge maps this to execute or legacy batch_design according to tools/list. filePath is the .pen file. .pen files are encrypted; never read/write them with the fs tools. Changes are saved to the file after each successful call.',
       {
         filePath: { type: 'string', required: true, description: 'Path to the .pen file, relative to the workspace.' },
         input: { type: 'string', description: 'JavaScript snippet to execute (required unless editId+edits are used).' },
