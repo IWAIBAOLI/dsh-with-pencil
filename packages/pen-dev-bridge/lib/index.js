@@ -92,6 +92,7 @@ export default {
     const cliSocket = path.join(os.homedir(), '.pencil', 'socket', 'pencil-cli.sock')
     let activeEngine = null
     let mcpSerial = Promise.resolve()
+    let canvasBridge = null
     function engineFor(exec) {
       const workspace = workspaceForExec(exec)
       const key = String(exec && exec.agent && exec.agent.session && exec.agent.session.id || workspace)
@@ -330,7 +331,7 @@ export default {
         stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n')
       })
       const init = async () => {
-        await call('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'dsh-pen-dev-bridge', version: '0.3.4' } })
+        await call('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'dsh-pen-dev-bridge', version: '0.3.5' } })
         stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n')
         const listed = await call('tools/list', {})
         const tools = listed && listed.result && Array.isArray(listed.result.tools) ? listed.result.tools : []
@@ -366,10 +367,27 @@ export default {
     async function runMcpNow(tool, args, opts) {
       const workspace = workspaceForExec(opts.exec)
       const engine = engineFor(opts.exec)
+      const fileArg = (opts && opts.filePath) || (args && args.filePath)
+
+      // Official pen.dev App Mode forwards MCP operations to the editor
+      // webview's IPC server. Prefer the same single-engine route whenever
+      // this conversation has an initialized canvas; headless remains the
+      // fallback for conversations whose canvas was never opened.
+      if (canvasBridge && canvasBridge.has(opts.exec)) {
+        if (canvasBridge.supports(tool)) {
+          if (engine.handle) await stopEngine(engine)
+          return canvasBridge.run(tool, args || {}, opts, fileArg)
+        }
+        // Some legacy editor bundles do not expose file-export handlers to
+        // their webview IPC. Flush the live document first, then let the
+        // read-only headless fallback export that exact disk snapshot.
+        const flushed = await canvasBridge.flush(opts, fileArg)
+        if (!flushed.ok) return flushed
+      }
+
       let appName = detectApp(engine)
       // Engine file may differ from the MCP argument filePath (get_screenshot
       // must not receive filePath, but still needs the engine on that file).
-      const fileArg = (opts && opts.filePath) || (args && args.filePath)
       if (fileArg) {
         try {
           await ensureEngine(fileArg, opts.exec)
@@ -536,7 +554,7 @@ export default {
         return { ok: r.exitCode === 0 && !r.aborted, text }
       }, 180000)
 
-    register('pencil_mcp_open', 'Open (or switch) a .pen file into the local pen.dev headless engine. Spawns the engine once per file and keeps it alive so DeepSeek can drive design work through the pencil_mcp_* tools. Call this FIRST with the target .pen path; the file is created on first save. Returns the current app state.',
+    register('pencil_mcp_open', 'Open (or switch) a .pen file for this conversation. If its browser canvas is open, the file is loaded into that live editor and later MCP edits render there immediately; otherwise a local headless engine is used. Call this FIRST with the target .pen path. Returns the current app state.',
       {
         filePath: { type: 'string', required: true, description: 'Path to the .pen file, relative to the workspace.' },
       },
@@ -552,10 +570,11 @@ export default {
           include_scripts_and_shaders: false,
         }, { exec, filePath: target, signal: exec.signal })
         if (!state.ok) return state
-        return { ok: true, text: 'Engine ready on ' + target + '.\n\n' + state.text.slice(0, 4000) }
+        const readyLabel = state.mode === 'canvas' ? 'Live canvas ready on ' : 'Headless engine ready on '
+        return { ok: true, text: readyLabel + target + '.\n\n' + state.text.slice(0, 4000) }
       }, 60000)
 
-    register('pencil_mcp_get_app_state', 'Official Pencil MCP tool: get the current state of the .pen canvas editor (document, selection, browser state). Works against the local headless engine once pencil_mcp_open has opened a file. Always start design sessions with this (include_schema true) to learn the .pen schema.',
+    register('pencil_mcp_get_app_state', 'Official Pencil MCP tool: get the current state of the live conversation canvas, or its headless fallback when no canvas is open. Always start design sessions with this (include_schema true) to learn the .pen schema.',
       {
         include_schema: { type: 'boolean', description: 'Include the .pen file schema (default false).' },
         include_canvas_design: { type: 'boolean', description: 'Include canvas editor instructions (default false).' },
@@ -586,7 +605,7 @@ export default {
         return runMcp('get_guidelines', a, { exec, signal: exec.signal })
       }, 120000)
 
-    register('pencil_mcp_execute', 'Official Pencil MCP tool: modify a .pen document by running a JavaScript snippet (Insert/Get/Set/Print etc., see get_app_state with include_schema for the schema). The bridge maps this to execute or legacy batch_design according to tools/list. filePath is the .pen file. .pen files are encrypted; never read/write them with the fs tools. Changes are saved to the file after each successful call.',
+    register('pencil_mcp_execute', 'Official Pencil MCP tool: modify a .pen document by running a JavaScript snippet (Insert/Get/Set/Print etc., see get_app_state with include_schema for the schema). With an open conversation canvas, this directly edits the visible editor via its official webview IPC; otherwise the bridge maps to execute or legacy batch_design in headless mode. Changes are saved and verified after each successful call.',
       {
         filePath: { type: 'string', required: true, description: 'Path to the .pen file, relative to the workspace.' },
         input: { type: 'string', description: 'JavaScript snippet to execute (required unless editId+edits are used).' },
@@ -690,6 +709,90 @@ export default {
       let hostMsgSeq = 0
       let rawIndex
       let resolvedEditorDir
+
+      function sessionIdForExec(exec) {
+        return String(exec && exec.agent && exec.agent.session && exec.agent.session.id || '')
+      }
+      function bindingForExec(exec) {
+        const sessionId = sessionIdForExec(exec)
+        if (!sessionId) return undefined
+        return [...bindings.values()].find((binding) => binding.sessionId === sessionId)
+      }
+      function pushCanvasMessage(binding, message) {
+        binding.queue.push(message)
+        const waiter = binding.pollWaiters.shift()
+        if (waiter) waiter.finish(binding.queue.splice(0, binding.queue.length))
+      }
+      function rejectCanvasRequests(binding, error) {
+        for (const pending of binding.pendingRequests.values()) {
+          clearTimeout(pending.timer)
+          pending.reject(error)
+        }
+        binding.pendingRequests.clear()
+        for (const waiter of binding.saveWaiters.splice(0)) {
+          clearTimeout(waiter.timer)
+          waiter.reject(error)
+        }
+      }
+      function requestCanvas(binding, method, payload, timeoutMs = 120000) {
+        if (!binding.initialized || Date.now() - binding.lastSeen > 30000) {
+          return Promise.reject(new Error('the conversation canvas is not connected'))
+        }
+        return new Promise((resolve, reject) => {
+          hostMsgSeq += 1
+          const id = 'host-' + hostMsgSeq + '-' + Date.now()
+          const timer = setTimeout(() => {
+            binding.pendingRequests.delete(id)
+            reject(new Error('canvas request ' + method + ' timed out after ' + timeoutMs + 'ms'))
+          }, timeoutMs)
+          binding.pendingRequests.set(id, { resolve, reject, timer, method })
+          pushCanvasMessage(binding, { id, type: 'request', method, payload })
+        })
+      }
+      function waitForCanvasSave(binding, revision, timeoutMs = 20000) {
+        if (binding.saveRevision > revision) return Promise.resolve()
+        return new Promise((resolve, reject) => {
+          const waiter = { revision, resolve, reject, timer: null }
+          waiter.timer = setTimeout(() => {
+            const index = binding.saveWaiters.indexOf(waiter)
+            if (index !== -1) binding.saveWaiters.splice(index, 1)
+            reject(new Error('canvas did not persist the document in time'))
+          }, timeoutMs)
+          binding.saveWaiters.push(waiter)
+        })
+      }
+      async function inspectCanvasFile(target) {
+        const content = await fsp.readFile(target, 'utf8')
+        const document = JSON.parse(content)
+        if (!document || !Array.isArray(document.children)) throw new Error('saved .pen file is not a valid document')
+        return { bytes: Buffer.byteLength(content), children: document.children.length }
+      }
+      async function saveCanvas(binding) {
+        if (!binding.initialized || binding.loadedFile !== binding.currentFile) {
+          throw new Error('canvas document is not ready to save')
+        }
+        if (!binding.dirty) {
+          try { return await inspectCanvasFile(binding.currentFile) }
+          catch (err) {
+            if (err && err.code === 'ENOENT') return { bytes: 0, children: 0, skipped: true }
+            throw err
+          }
+        }
+        const revision = binding.saveRevision
+        binding.saveRequested = true
+        try {
+          await requestCanvas(binding, 'save-document', {}, 20000)
+          await waitForCanvasSave(binding, revision)
+        } finally {
+          binding.saveRequested = false
+        }
+        return inspectCanvasFile(binding.currentFile)
+      }
+      function enqueueCanvas(binding, run) {
+        const operation = binding.serial.then(run, run)
+        binding.serial = operation.then(() => undefined, () => undefined)
+        return operation
+      }
 
       // Editor assets are plugin resources, never a conversation workspace.
       // Resolve them lazily on the first canvas request: an explicit override,
@@ -804,7 +907,7 @@ export default {
             binding.loadedFile = null
             binding.autosaveAfter = Infinity
             hostMsgSeq += 1
-            binding.queue.push({
+            pushCanvasMessage(binding, {
               id: 'host-' + hostMsgSeq + '-' + Date.now(), type: 'notification', method: 'file-error',
               payload: { filePath: target, errorMessage: err && err.message ? err.message : String(err) },
             })
@@ -813,9 +916,10 @@ export default {
           content = JSON.stringify({ version: EDITOR_SCHEMA_VERSION, children: [], fileToken: randomUUID() })
         }
         binding.loadedFile = target
+        binding.dirty = false
         binding.autosaveAfter = Date.now() + 6000
         hostMsgSeq += 1
-        binding.queue.push({
+        pushCanvasMessage(binding, {
           id: 'host-' + hostMsgSeq + '-' + Date.now(), type: 'notification', method: 'file-update',
           payload: { fileURI: 'file://' + target, content, zoomToFit: true, isDirty: false, displayName: path.basename(target) },
         })
@@ -866,16 +970,18 @@ window.PENCIL_INIT_PARAMS = {
   isTemporary: false,
   fileURI: 'file://' + __penFile
 };
-setInterval(function () {
+function __penPoll() {
   fetch(__penHostUrl('/pen-host/pending'), { method: 'GET' })
     .then(function (r) { return r.json() })
     .then(function (d) {
       if (d && Array.isArray(d.messages)) {
         for (var i = 0; i < d.messages.length; i++) window.postMessage(d.messages[i], '*')
       }
+      setTimeout(__penPoll, 0);
     })
-    .catch(function () {})
-}, 1000);
+    .catch(function () { setTimeout(__penPoll, 1000); });
+}
+__penPoll();
 </script>`
         const marker = '<script type="module"'
         const idx = html.indexOf(marker)
@@ -895,10 +1001,12 @@ setInterval(function () {
       const autosaveTimer = setInterval(() => {
         for (const binding of bindings.values()) {
           if (binding.loadedFile !== binding.currentFile) continue
+          if (!binding.dirty) continue
           if (Date.now() < binding.autosaveAfter) continue
           if (binding.queue.length >= 8) continue
-          hostMsgSeq += 1
-          binding.queue.push({ id: 'host-' + hostMsgSeq + '-' + Date.now(), type: 'request', method: 'save-document', payload: {} })
+          void enqueueCanvas(binding, () => saveCanvas(binding)).catch((err) => {
+            console.warn('[pen-dev-bridge] canvas autosave failed:', err && err.message)
+          })
         }
       }, 6000)
       ctx.effect(() => () => clearInterval(autosaveTimer))
@@ -965,6 +1073,11 @@ setInterval(function () {
         if (!workspace || !path.isAbsolute(workspace)) {
           res.writeHead(409); res.end('conversation has no workspace'); return
         }
+        const sessionEngine = engines.get(sessionId)
+        if (sessionEngine && sessionEngine.handle) {
+          try { await stopEngine(sessionEngine) }
+          catch (err) { res.writeHead(409); res.end('failed to hand off headless document: ' + err.message); return }
+        }
         const existing = [...bindings.values()].find((item) => item.sessionId === sessionId)
         if (existing) {
           res.writeHead(200, { 'Content-Type': 'application/json' })
@@ -975,7 +1088,12 @@ setInterval(function () {
         let currentFile
         try { currentFile = defaultFile(workspace) }
         catch (err) { res.writeHead(409); res.end(err.message); return }
-        const binding = { key, sessionId, workspace, currentFile, loadedFile: null, autosaveAfter: Infinity, queue: [] }
+        const binding = {
+          key, sessionId, workspace, currentFile, loadedFile: null, autosaveAfter: Infinity,
+          queue: [], pollWaiters: [], pendingRequests: new Map(), saveRevision: 0,
+          saveWaiters: [], saveRequested: false, dirty: false, initialized: false, lastSeen: 0,
+          serial: Promise.resolve(),
+        }
         bindings.set(key, binding)
         res.writeHead(200, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ binding: key, workspace, file: binding.currentFile }))
@@ -1022,10 +1140,17 @@ setInterval(function () {
         if (path.extname(target).toLowerCase() !== '.pen') {
           res.writeHead(400); res.end('canvas file must end in .pen'); return
         }
-        binding.currentFile = target
-        binding.loadedFile = null
-        binding.autosaveAfter = Infinity
-        binding.queue = []
+        try {
+          await enqueueCanvas(binding, async () => {
+            if (binding.initialized && binding.loadedFile === binding.currentFile) await saveCanvas(binding)
+            binding.currentFile = target
+            binding.loadedFile = null
+            binding.autosaveAfter = Infinity
+            await queueCurrentFile(binding)
+            if (binding.loadedFile !== target) throw new Error('canvas refused to load ' + target)
+          })
+        }
+        catch (err) { res.writeHead(500); res.end(err.message); return }
         res.writeHead(200, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ file: target }))
       }
@@ -1051,11 +1176,13 @@ setInterval(function () {
       async function handleIpc(req, res) {
         const binding = bindingOf(req)
         if (!binding) { res.writeHead(401); res.end('invalid canvas binding'); return }
+        binding.lastSeen = Date.now()
         let msg
         try { msg = await readBody(req) }
         catch (err) { res.writeHead(400); res.end('bad json'); return }
         if (msg.type === 'notification') {
           if (msg.method === 'initialized') {
+            binding.initialized = true
             await queueCurrentFile(binding)
           } else if (msg.method === 'set-current-file') {
             try {
@@ -1063,9 +1190,10 @@ setInterval(function () {
               binding.currentFile = insideWorkspace(binding, uri)
               binding.loadedFile = null
               binding.autosaveAfter = Infinity
-              binding.queue = []
             }
             catch (err) { res.writeHead(403); res.end('forbidden'); return }
+          } else if (msg.method === 'file-changed') {
+            if (binding.loadedFile === binding.currentFile) binding.dirty = true
           } else if (msg.method === 'set-session') {
             if (msg.payload && msg.payload.token) {
               uiState.email = msg.payload.email || ''
@@ -1073,10 +1201,18 @@ setInterval(function () {
               persistState()
             }
           } else if (msg.method === 'save-resource') {
-            if (binding.currentFile && binding.loadedFile === binding.currentFile && Date.now() >= binding.autosaveAfter && msg.payload && msg.payload.content !== undefined) {
+            if (binding.currentFile && binding.loadedFile === binding.currentFile && (binding.saveRequested || Date.now() >= binding.autosaveAfter) && msg.payload && msg.payload.content !== undefined) {
               try {
                 const target = insideWorkspace(binding, binding.currentFile)
                 await writeFileAtomic(target, String(msg.payload.content))
+                binding.dirty = false
+                binding.saveRevision += 1
+                for (const waiter of binding.saveWaiters.slice()) {
+                  if (binding.saveRevision <= waiter.revision) continue
+                  clearTimeout(waiter.timer)
+                  binding.saveWaiters.splice(binding.saveWaiters.indexOf(waiter), 1)
+                  waiter.resolve()
+                }
               } catch (err) { console.error('[pen-dev-bridge] save failed', err && err.message) }
             }
           }
@@ -1084,6 +1220,13 @@ setInterval(function () {
           return
         }
         if (msg.type === 'response') {
+          const pending = binding.pendingRequests.get(msg.id)
+          if (pending) {
+            binding.pendingRequests.delete(msg.id)
+            clearTimeout(pending.timer)
+            if (msg.error) pending.reject(new Error(msg.error.message || ('canvas ' + pending.method + ' failed')))
+            else pending.resolve(msg.payload)
+          }
           res.writeHead(200); res.end('{}')
           return
         }
@@ -1136,6 +1279,100 @@ setInterval(function () {
         res.end(JSON.stringify({ id: msg.id, type: 'response', method: msg.method, payload: out }))
       }
 
+      const canvasMethods = {
+        get_app_state: 'get-editor-state',
+        get_guidelines: 'get-guidelines',
+        execute: 'batch-design',
+        get_screenshot: 'get-screenshot',
+      }
+      async function waitForCanvasReady(binding, timeoutMs = 20000) {
+        const started = Date.now()
+        while ((!binding.initialized || Date.now() - binding.lastSeen > 30000) && Date.now() - started < timeoutMs) {
+          await new Promise((resolve) => setTimeout(resolve, 100))
+        }
+        if (!binding.initialized || Date.now() - binding.lastSeen > 30000) {
+          throw new Error('the conversation canvas did not connect in time')
+        }
+      }
+      async function selectCanvasFile(binding, requestedFile) {
+        if (!requestedFile) return
+        const target = insideWorkspace(binding, requestedFile)
+        if (path.extname(target).toLowerCase() !== '.pen') throw new Error('canvas file must end in .pen')
+        if (binding.currentFile === target && binding.loadedFile === target) return
+        if (binding.initialized && binding.loadedFile === binding.currentFile) await saveCanvas(binding)
+        binding.currentFile = target
+        binding.loadedFile = null
+        binding.autosaveAfter = Infinity
+        await queueCurrentFile(binding)
+        if (binding.loadedFile !== target) throw new Error('canvas refused to load ' + target)
+      }
+      function canvasResultText(result) {
+        if (result && result.image) {
+          const bytes = Math.round(String(result.image).length * 0.75 / 1024)
+          return '[screenshot: ' + bytes + ' KB ' + String(result.mimeType || 'image/png') + ' (base64)]'
+        }
+        if (result && result.message != null) return String(result.message)
+        return result === undefined ? '' : JSON.stringify(result)
+      }
+      canvasBridge = {
+        has(exec) { return !!bindingForExec(exec) },
+        supports(tool) { return !!canvasMethods[tool] },
+        async flush(opts, fileArg) {
+          const binding = bindingForExec(opts.exec)
+          if (!binding) return { ok: false, text: 'No live canvas is bound to this conversation.' }
+          return enqueueCanvas(binding, async () => {
+            try {
+              await waitForCanvasReady(binding)
+              await selectCanvasFile(binding, fileArg)
+              const persisted = await saveCanvas(binding)
+              return { ok: true, text: 'Live canvas flushed to disk (' + persisted.bytes + ' bytes).' }
+            } catch (err) {
+              return { ok: false, text: 'Live canvas flush failed: ' + (err && err.message ? err.message : String(err)) }
+            }
+          })
+        },
+        async run(tool, args, opts, fileArg) {
+          const binding = bindingForExec(opts.exec)
+          if (!binding) return null
+          return enqueueCanvas(binding, async () => {
+            try {
+              await waitForCanvasReady(binding)
+              await selectCanvasFile(binding, fileArg)
+              const method = canvasMethods[tool]
+              if (!method) return { ok: false, text: 'Canvas tool unavailable: ' + tool }
+              const payload = { ...args }
+              delete payload.filePath
+              if (method === 'get-editor-state') {
+                payload.include_schema = !!args.include_schema
+                delete payload.include_canvas_design
+                delete payload.include_scripts_and_shaders
+              }
+              if (method === 'batch-design' && !payload.input) {
+                return { ok: false, text: 'This canvas editor requires input; editId patch retries are unavailable.' }
+              }
+              const response = await withSignal(requestCanvas(binding, method, payload), opts.signal)
+              if (response && response.success === false) {
+                return { ok: false, text: 'Canvas error: ' + String(response.error || 'tool call failed').slice(0, 4000) }
+              }
+              const result = response && Object.prototype.hasOwnProperty.call(response, 'result') ? response.result : response
+              let text = canvasResultText(result)
+              if (tool === 'execute') {
+                binding.dirty = true
+                try {
+                  const persisted = await saveCanvas(binding)
+                  text += '\nSaved by live canvas: ' + binding.currentFile + ' (' + persisted.bytes + ' bytes, ' + persisted.children + ' top-level nodes).'
+                } catch (err) {
+                  return { ok: false, text: text.slice(0, 6000) + '\n\nCanvas edit succeeded, but disk save failed: ' + (err && err.message ? err.message : String(err)) }
+                }
+              }
+              return { ok: true, mode: 'canvas', text: text.slice(0, 8000) }
+            } catch (err) {
+              return { ok: false, text: 'Live canvas call failed: ' + (err && err.message ? err.message : String(err)) }
+            }
+          })
+        },
+      }
+
       const routeDisposers = []
       routeDisposers.push(webServer.register({ kind: 'prefix', path: '/pen-editor', handler: (req, res) => {
         serveStatic(req, res).catch((err) => {
@@ -1150,9 +1387,36 @@ setInterval(function () {
       routeDisposers.push(webServer.register({ kind: 'exact', path: '/pen-host/pending', handler: async (req, res) => {
         const binding = bindingOf(req)
         if (!binding) { res.writeHead(401); res.end('invalid canvas binding'); return }
-        const messages = binding.queue.splice(0, binding.queue.length)
+        binding.lastSeen = Date.now()
+        const send = (messages) => {
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ messages }))
+        }
+        if (binding.queue.length) { send(binding.queue.splice(0, binding.queue.length)); return }
+        const waiter = { done: false, timer: null, finish: null }
+        waiter.finish = (messages) => {
+          if (waiter.done) return
+          waiter.done = true
+          clearTimeout(waiter.timer)
+          const index = binding.pollWaiters.indexOf(waiter)
+          if (index !== -1) binding.pollWaiters.splice(index, 1)
+          try { send(messages) } catch (err) { /* browser disconnected */ }
+        }
+        waiter.timer = setTimeout(() => waiter.finish([]), 25000)
+        res.once('close', () => {
+          if (waiter.done) return
+          waiter.done = true
+          clearTimeout(waiter.timer)
+          const index = binding.pollWaiters.indexOf(waiter)
+          if (index !== -1) binding.pollWaiters.splice(index, 1)
+        })
+        binding.pollWaiters.push(waiter)
+      } }))
+      routeDisposers.push(webServer.register({ kind: 'exact', path: '/pen-host/state', handler: async (req, res) => {
+        const binding = bindingOf(req)
+        if (!binding) { res.writeHead(401); res.end('invalid canvas binding'); return }
         res.writeHead(200, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ messages: messages }))
+        res.end(JSON.stringify({ file: binding.currentFile, connected: binding.initialized && Date.now() - binding.lastSeen < 30000 }))
       } }))
       routeDisposers.push(webServer.register({ kind: 'exact', path: '/pen-session-token', handler: async (req, res) => {
         if (!bindingOf(req)) { res.writeHead(401); res.end('invalid canvas binding'); return }
@@ -1160,6 +1424,14 @@ setInterval(function () {
         res.end(JSON.stringify({ token: sessionToken() }))
       } }))
       for (const d of routeDisposers) if (d) ctx.effect(() => d)
+      ctx.effect(() => () => {
+        canvasBridge = null
+        for (const binding of bindings.values()) {
+          rejectCanvasRequests(binding, new Error('pen.dev canvas bridge stopped'))
+          for (const waiter of binding.pollWaiters.splice(0)) waiter.finish([])
+        }
+        bindings.clear()
+      })
       console.log('[pen-dev-bridge] pen.dev canvas routes ready at /pen-editor (binds workspace on conversation trigger)')
     }
 

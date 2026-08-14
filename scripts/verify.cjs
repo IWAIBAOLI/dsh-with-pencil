@@ -166,6 +166,9 @@ try {
   if (!client.includes('DEFAULT_SPLIT_RATIO = 0.42') || !client.includes('ratio: width / viewport') || !client.includes('setViewportWidth(viewport)') || client.includes('wide: width')) {
     fail('split canvas width must default smaller and follow viewport ratio')
   } else ok('split canvas defaults to 42% and follows viewport ratio')
+  if (!client.includes("fetch('/pen-host/state?binding='") || !client.includes('key: state.binding') || client.includes('key: state.file || state.binding')) {
+    fail('canvas iframe must stay mounted while agent-selected file labels synchronize')
+  } else ok('canvas iframe stays mounted while agent-selected file labels synchronize')
 } catch (err) { fail('browser half: ' + err.message) }
 
 // 4c. The host must not derive a workspace from its launch directory. Both
@@ -189,9 +192,15 @@ if (!pluginSource.includes('function __penDecodeResponse(resp)') || !pluginSourc
 if (!pluginSource.includes("const EDITOR_SCHEMA_VERSION = '2.14'") || !pluginSource.includes('document.version !== EDITOR_SCHEMA_VERSION') || !pluginSource.includes('async function queueCurrentFile(binding)') || !pluginSource.includes("msg.method === 'initialized'") || !pluginSource.includes("method: 'file-update'")) {
   fail('host must push the selected document after the editor initializes')
 } else ok('host pushes the selected document after editor initialization')
-if (!pluginSource.includes('binding.loadedFile !== binding.currentFile') || !pluginSource.includes('binding.loadedFile === binding.currentFile && Date.now() >= binding.autosaveAfter') || !pluginSource.includes('binding.queue = []') || !pluginSource.includes('writeFileAtomic')) {
+if (!pluginSource.includes('binding.loadedFile !== binding.currentFile') || !pluginSource.includes('(binding.saveRequested || Date.now() >= binding.autosaveAfter)') || !pluginSource.includes('async function saveCanvas(binding)') || !pluginSource.includes('writeFileAtomic')) {
   fail('autosave must wait for a successful file load and write atomically')
 } else ok('autosave waits for a successful file load and writes atomically')
+if (!pluginSource.includes("execute: 'batch-design'") || !pluginSource.includes('return canvasBridge.run(tool') || !pluginSource.includes("Saved by live canvas:") || !pluginSource.includes('function requestCanvas(')) {
+  fail('open conversation canvases must receive MCP edits through their own editor IPC')
+} else ok('MCP edits route directly through the open conversation canvas')
+if (!pluginSource.includes('function __penPoll()') || !pluginSource.includes('binding.pollWaiters.push(waiter)') || !pluginSource.includes("path: '/pen-host/state'")) {
+  fail('live canvas IPC must use low-latency polling and expose synchronized binding state')
+} else ok('live canvas IPC uses low-latency polling with synchronized binding state')
 if (!pluginSource.includes("get_app_state: ['get_app_state', 'get_editor_state']") || !pluginSource.includes("execute: ['execute', 'batch_design']") || !pluginSource.includes("await call('tools/list', {})")) {
   fail('MCP calls must map the schema-compatible CLI legacy tool names from tools/list')
 } else ok('MCP calls map legacy tool names discovered through tools/list')

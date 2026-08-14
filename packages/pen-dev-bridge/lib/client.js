@@ -175,7 +175,6 @@ html[data-penhost-pointer="drag"], html[data-penhost-pointer="drag"] * { cursor:
 			const { store, sessionId, state, active } = props
 			const dragRef = React.useRef(null)
 			const resizeRef = React.useRef(null)
-			const frameRef = React.useRef(null)
 			const menusRef = React.useRef(null)
 			const fileMenuRef = React.useRef(null)
 			const [menu, setMenu] = React.useState(null)
@@ -234,6 +233,24 @@ html[data-penhost-pointer="drag"], html[data-penhost-pointer="drag"] * { cursor:
 				window.addEventListener('pointerdown', onOutside, true)
 				return () => window.removeEventListener('pointerdown', onOutside, true)
 			}, [menu])
+
+			React.useEffect(() => {
+				if (!state.binding) return
+				let disposed = false
+				const sync = async () => {
+					try {
+						const response = await fetch('/pen-host/state?binding=' + encodeURIComponent(state.binding))
+						if (!response.ok) return
+						const result = await response.json()
+						if (!disposed && result.file && result.file !== (store.getSnapshot().sessions[sessionId] || EMPTY_SESSION).file) {
+							store.patch(sessionId, { file: result.file })
+						}
+					} catch (error) { /* host may be restarting */ }
+				}
+				void sync()
+				const timer = setInterval(sync, 1500)
+				return () => { disposed = true; clearInterval(timer) }
+			}, [state.binding, sessionId, store])
 
 			const startResize = (event) => {
 				if (state.mode !== 'split' || (event.button !== 0 && event.pointerType === 'mouse')) return
@@ -295,10 +312,6 @@ html[data-penhost-pointer="drag"], html[data-penhost-pointer="drag"] * { cursor:
 			const switchFile = async (file) => {
 				setMenuError(null)
 				try {
-					if (frameRef.current && frameRef.current.contentWindow) {
-						frameRef.current.contentWindow.postMessage({ id: 'penhost-switch-' + Date.now(), type: 'request', method: 'save-document', payload: {} }, '*')
-						await new Promise((resolve) => setTimeout(resolve, 350))
-					}
 					const response = await fetch('/pen-host/file?binding=' + encodeURIComponent(state.binding), {
 						method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ file }),
 					})
@@ -372,7 +385,7 @@ html[data-penhost-pointer="drag"], html[data-penhost-pointer="drag"] * { cursor:
 						onClick: () => store.patch(sessionId, { open: false }),
 					}, '✕')),
 				React.createElement('div', { className: 'dsh-penhost-body' },
-					React.createElement('iframe', { key: state.file || state.binding, ref: frameRef, className: 'dsh-penhost-frame', src: editorUrl, title: 'pen.dev 画布编辑器', allow: 'clipboard-read; clipboard-write' })))
+					React.createElement('iframe', { key: state.binding, className: 'dsh-penhost-frame', src: editorUrl, title: 'pen.dev 画布编辑器', allow: 'clipboard-read; clipboard-write' })))
 		}
 
 		function PenOverlay(props) {

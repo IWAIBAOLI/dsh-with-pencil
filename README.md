@@ -1,7 +1,8 @@
 # pen-dev-bridge — pen.dev (pencil.dev) 桥接 Bundle
 
 把官方 pen.dev（pencil.dev）的设计能力接入 DeepSeek Harness。**DeepSeek 就是设计 agent**：
-插件在 Host 半自持 pen.dev 的本地 headless 编辑器引擎（来自 `@pen.dev/cli`），并注册
+插件优先把工具调用直连到当前会话已打开的 pen.dev 浏览器画布，未打开画布时才在 Host 半
+自持本地 headless 编辑器引擎（来自 `@pen.dev/cli`），并注册
 12 个 `pencil_*` 动态模型工具 —— 官方 Pencil MCP 工具（`get_app_state` / `execute` /
 `export_html` / `export_nodes` / `get_screenshot` / `get_guidelines`）+ 一键 `pen` CLI 助手
 （`status` / `login` / `workspaces` / `design` / `export`）。
@@ -67,7 +68,11 @@ Bridge 会读取 MCP `tools/list`，把现行 `get_app_state` / `execute` 自动
 
 ## 引擎坐席
 
-- 默认：插件自持 **headless 引擎**（`pen interactive --out <file>`，stdin 保持打开）。
+- **画布已打开**：Bridge 按官方 App Mode 的结构，把 `pencil_mcp_*` 直接转成当前会话
+  Webview 的 `get-editor-state` / `batch-design` 等 IPC 请求；Agent 与用户看到的是同一个
+  文档模型，修改立即渲染。Host 使用低延迟长轮询承载双向 IPC，并在每次编辑后等待
+  `save-resource` 落盘再返回成功。文件导出工具会先 flush 活画布，再使用只读 headless 回退。
+- **画布未打开**：插件自持 headless 引擎（`pen interactive --out <file>`，stdin 保持打开）。
   每次 `execute` / `batch_design` 成功后会立即发送 `save()`，只有收到精确的 `Saved <path>`
   回执并重新读取到合法磁盘 JSON 后，工具才返回成功；失败时保留 dirty 状态并阻止静默切换文件。
 - 官方 CLI 固定使用全局 `pencil-cli.sock`，因此 Bridge 会串行执行 MCP 调用，并在会话文件间
@@ -97,7 +102,8 @@ Bridge 会读取 MCP `tools/list`，把现行 `get_app_state` / `execute` 自动
   系统文件管理器中打开目录，文件菜单只列出当前工作区内的 `.pen` 文件并支持新建、切换。
 - 标题栏可切换 **浮动窗口**（按住标题拖动），✕ 关闭后可从会话头部
   「✏ pen.dev 画布」按钮重新打开。
-- 每 6 秒宿主向编辑器推 `save-document`，编辑器回 `save-resource` 内容落盘到
+- MCP 修改直接作用于当前会话的可见画布，并与用户的缩放、选择和编辑状态共享同一个引擎；
+  每 6 秒宿主也会为用户手工编辑推 `save-document`，编辑器回 `save-resource` 内容落盘到
   当前 `.pen` 文件；会话 token 读 `~/.pencil/session-cli.json`，浏览器登录态存于
   `~/.dsh/pen-dev-bridge/state.json` 并由同一 profile 的所有会话共享，不会污染项目工作区。
 - 编辑器初始化后，宿主会主动推送当前文件的 `file-update`；`.pen` 内容通过二进制 IPC 读取；
