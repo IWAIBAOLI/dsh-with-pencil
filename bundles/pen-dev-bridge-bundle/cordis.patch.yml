@@ -14,4 +14,4 @@
 - insert:
     - id: pen-dev-bridge
       name: 'pen-dev-bridge'
-      inject: ['tools', 'subprocess', 'sandboxPolicy', 'webServer']
+      inject: ['tools', 'subprocess', 'sandboxPolicy', 'webServer', 'sessions']

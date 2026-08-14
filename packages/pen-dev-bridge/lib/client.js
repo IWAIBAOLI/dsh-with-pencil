@@ -5,17 +5,13 @@ window.__ModuleLoader__.load({
 		var exports = module.exports;
 		const React = require('react')
 
-		// pen-dev-bridge — browser half.
-		//
-		// The pen.dev canvas seat: a right-side split-screen editor (default
-		// 50% width, draggable left edge) or a floating window, fed by the
-		// host half's /pen-editor static routes + /pen-host IPC bridge. The
-		// product's own details column is hidden while the split is active so
-		// it never shows through behind the canvas.
-
+		// Browser half. Canvas state is keyed by Harness session id. The root
+		// overlay follows useSessions().current, while each header action mutates
+		// only its own session entry.
 		const STYLE_TAG_ID = 'pen-dev-bridge/canvas.css'
 		const CSS = `
 .dsh-penhost-panel { display: flex; flex-direction: column; background: var(--dsw-alias-bg-overlay, #1d1e24); color: var(--dsw-alias-label-primary, #eee); border: 1px solid var(--dsw-alias-border-l2, #3a3d4a); font: 13px/1.5 system-ui, -apple-system, sans-serif; overflow: hidden; }
+.dsh-penhost-panel[hidden] { display: none !important; }
 .dsh-penhost-panel * { box-sizing: border-box; }
 .dsh-penhost-split { position: fixed; top: 0; bottom: 0; right: 0; z-index: 9996; pointer-events: auto; border-radius: 0; border-top: none; border-right: none; border-bottom: none; box-shadow: -8px 0 24px rgba(0,0,0,.25); }
 .dsh-penhost-float { position: fixed; z-index: 9998; pointer-events: auto; border-radius: 12px; box-shadow: 0 18px 48px rgba(0,0,0,.45); }
@@ -35,9 +31,12 @@ window.__ModuleLoader__.load({
 .dsh-penhost-header-btn { padding: 4px 10px; border-radius: 6px; border: 1px solid var(--dsw-alias-border-l1, #34353d); background: transparent; color: var(--dsw-alias-label-secondary, #9aa0b4); cursor: pointer; font-size: 12px; }
 .dsh-penhost-header-btn:hover { background: var(--dsw-alias-bg-layer-1, #26272e); color: var(--dsw-alias-label-primary, #eee); border-color: var(--dsw-alias-border-l2, #3a3d4a); }
 .dsh-penhost-header-on { color: var(--dsw-alias-brand-primary, #4f7cff); border-color: var(--dsw-alias-brand-primary, #4f7cff); }
+.dsh-penhost-header-error { color: #ef7373; border-color: #ef7373; }
 [data-penhost-wide] { grid-template-columns: var(--penhost-grid) !important; }
-[data-penhost-wide] .pI_x6G_detailsCol, [data-penhost-wide] > div:nth-child(3) { visibility: hidden; }
+[data-penhost-wide] > div:nth-child(3) { visibility: hidden; }
 `
+
+		const EMPTY_SESSION = Object.freeze({ open: false, mode: 'split', wide: 0, pos: null, binding: null, workspace: null, file: null, loading: false, error: null })
 
 		function insertStyles() {
 			if (typeof document === 'undefined') return () => {}
@@ -50,194 +49,224 @@ window.__ModuleLoader__.load({
 			return () => tag.remove()
 		}
 
+		function createSessionStore() {
+			let snapshot = { sessions: {} }
+			const listeners = new Set()
+			const emit = () => { for (const listener of listeners) listener() }
+			const patch = (sessionId, update) => {
+				const previous = snapshot.sessions[sessionId] || EMPTY_SESSION
+				const next = typeof update === 'function' ? update(previous) : { ...previous, ...update }
+				snapshot = { sessions: { ...snapshot.sessions, [sessionId]: next } }
+				emit()
+			}
+			return {
+				getSnapshot: () => snapshot,
+				subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener) },
+				patch,
+				clear() { snapshot = { sessions: {} }; listeners.clear() },
+			}
+		}
+
+		function useBridgeSnapshot(store) {
+			return React.useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot)
+		}
+
+		async function openForSession(store, sessionId, workspace) {
+			const current = store.getSnapshot().sessions[sessionId] || EMPTY_SESSION
+			if (current.binding) { store.patch(sessionId, { open: true, error: null }); return }
+			if (current.loading) return
+			store.patch(sessionId, { loading: true, error: null })
+			try {
+				const response = await fetch('/pen-host/bind', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ sessionId, workspace }),
+				})
+				if (!response.ok) throw new Error((await response.text()) || ('HTTP ' + response.status))
+				const result = await response.json()
+				store.patch(sessionId, {
+					binding: result.binding,
+					workspace: result.workspace,
+					file: result.file,
+					loading: false,
+					open: true,
+					error: null,
+				})
+			} catch (error) {
+				store.patch(sessionId, { loading: false, open: false, error: error && error.message ? error.message : String(error) })
+			}
+		}
+
+		function frameOf() {
+			try {
+				const overlay = document.querySelector('[data-shell-overlay]')
+				return overlay ? overlay.parentElement : null
+			} catch (error) { return null }
+		}
+
 		function PenCanvas(props) {
-			const store = props.store
-			const [open, setOpen] = React.useState(store.open)
-			const [mode, setMode] = React.useState(store.mode)
-			const [wide, setWide] = React.useState(store.wide)
-			React.useEffect(() => store.subscribe(() => { setOpen(store.open); setMode(store.mode); setWide(store.wide) }), [])
-			const [pos, setPos] = React.useState(null)
+			const { store, sessionId, state, active } = props
 			const dragRef = React.useRef(null)
 			const resizeRef = React.useRef(null)
+			const clampWide = React.useCallback((value) => Math.min(Math.max(Math.round(value), 400), Math.max(400, window.innerWidth - 560)), [])
+			const effectiveWide = state.wide || clampWide(window.innerWidth * 0.5)
 
-			React.useEffect(() => {
-				if (store.open && store.mode === 'float' && pos === null) {
-					setPos({ x: Math.max(12, window.innerWidth - 920), y: Math.max(12, window.innerHeight - 720) })
-				}
-			}, [store.open, store.mode])
-
-			const clampWide = (w) => Math.min(Math.max(Math.round(w), 400), Math.max(400, window.innerWidth - 560))
-
-			const frameOf = () => {
-				try {
-					const overlay = document.querySelector('[data-shell-overlay]')
-					return overlay ? overlay.parentElement : null
-				} catch (err) { return null }
-			}
-			const applyGrid = (frame, w) => {
+			const applyGrid = React.useCallback((frame, width) => {
 				try {
 					const parts = String(getComputedStyle(frame).gridTemplateColumns).split(' ')
-					frame.dataset.penhostWide = '1'
-					frame.style.setProperty('--penhost-grid', (parts[0] || '300px') + ' minmax(0, 1fr) ' + w + 'px')
-				} catch (err) { /* ignore */ }
-			}
+					frame.dataset.penhostWide = sessionId
+					frame.style.setProperty('--penhost-grid', (parts[0] || '300px') + ' minmax(0, 1fr) ' + width + 'px')
+				} catch (error) { /* shell may be between layouts */ }
+			}, [sessionId])
 
-			React.useEffect(() => {
-				if (store.mode !== 'split' || !store.open) return
+			React.useLayoutEffect(() => {
+				if (!active || !state.open || state.mode !== 'split') return
 				const frame = frameOf()
 				if (!frame) return
-				if (!store.wide) store.wide = clampWide(window.innerWidth * 0.5)
-				applyGrid(frame, store.wide)
+				const width = clampWide(state.wide || window.innerWidth * 0.5)
+				if (state.wide !== width) store.patch(sessionId, { wide: width })
+				applyGrid(frame, width)
 				const onResize = () => {
-					store.wide = clampWide(store.wide || window.innerWidth * 0.5)
-					applyGrid(frame, store.wide)
-					for (const fn of store.listeners) fn()
+					const next = clampWide((store.getSnapshot().sessions[sessionId] || EMPTY_SESSION).wide || window.innerWidth * 0.5)
+					store.patch(sessionId, { wide: next })
+					applyGrid(frame, next)
 				}
 				window.addEventListener('resize', onResize)
-				let mo = null
-				try {
-					mo = new MutationObserver(() => {
-						try {
-							const parts = String(getComputedStyle(frame).gridTemplateColumns).split(' ')
-							const third = parseFloat(parts[2] || '0')
-							if (store.mode === 'split' && Math.abs(third - store.wide) > 4) applyGrid(frame, store.wide)
-						} catch (err) { /* ignore */ }
-					})
-					mo.observe(frame, { attributes: true, attributeFilter: ['style'] })
-				} catch (err) { /* fallback */ }
 				return () => {
 					window.removeEventListener('resize', onResize)
-					if (mo) { try { mo.disconnect() } catch (err) { /* ignore */ } }
-					delete frame.dataset.penhostWide
-					frame.style.removeProperty('--penhost-grid')
+					if (frame.dataset.penhostWide === sessionId) {
+						delete frame.dataset.penhostWide
+						frame.style.removeProperty('--penhost-grid')
+					}
 				}
-			}, [store.mode, store.open])
+			}, [active, state.open, state.mode, state.wide, sessionId, store, clampWide, applyGrid])
 
-			const endResize = () => {
-				const r = resizeRef.current
-				if (!r) return
-				window.removeEventListener('pointermove', r.onMove)
-				window.removeEventListener('pointerup', r.onUp)
-				window.removeEventListener('pointercancel', r.onUp)
-				window.removeEventListener('blur', r.onUp)
-				resizeRef.current = null
-			}
-			const startResize = (e) => {
-				if (store.mode !== 'split') return
-				if (e.button !== 0 && e.pointerType === 'mouse') return
-				e.preventDefault(); e.stopPropagation()
-				try { e.currentTarget.setPointerCapture(e.pointerId) } catch (err) { /* ignore */ }
+			React.useEffect(() => () => {
+				const resize = resizeRef.current
+				if (resize) resize.finish()
+				const drag = dragRef.current
+				if (drag) drag.finish()
+			}, [])
+
+			const startResize = (event) => {
+				if (state.mode !== 'split' || (event.button !== 0 && event.pointerType === 'mouse')) return
+				event.preventDefault(); event.stopPropagation()
 				const frame = frameOf()
-				const startX = e.clientX
-				const startWide = store.wide || 720
-				const onMove = (ev) => {
-					const delta = startX - ev.clientX
-					store.wide = clampWide(startWide + delta)
-					if (frame) applyGrid(frame, store.wide)
-					for (const fn of store.listeners) fn()
+				const startX = event.clientX
+				const startWide = effectiveWide
+				const finish = () => {
+					window.removeEventListener('pointermove', onMove)
+					window.removeEventListener('pointerup', finish)
+					window.removeEventListener('pointercancel', finish)
+					window.removeEventListener('blur', finish)
+					resizeRef.current = null
 				}
-				const onUp = () => { endResize() }
-				resizeRef.current = { onMove, onUp }
+				const onMove = (moveEvent) => {
+					const width = clampWide(startWide + startX - moveEvent.clientX)
+					store.patch(sessionId, { wide: width })
+					if (frame) applyGrid(frame, width)
+				}
+				resizeRef.current = { finish }
 				window.addEventListener('pointermove', onMove)
-				window.addEventListener('pointerup', onUp)
-				window.addEventListener('pointercancel', onUp)
-				window.addEventListener('blur', onUp)
+				window.addEventListener('pointerup', finish)
+				window.addEventListener('pointercancel', finish)
+				window.addEventListener('blur', finish)
 			}
 
-			const endDrag = () => {
-				const d = dragRef.current
-				if (!d) return
-				window.removeEventListener('pointermove', d.onMove)
-				window.removeEventListener('pointerup', d.onUp)
-				window.removeEventListener('pointercancel', d.onUp)
-				window.removeEventListener('blur', d.onUp)
-				dragRef.current = null
-			}
-			const startDrag = (e) => {
-				if (store.mode !== 'float') return
-				if (e.button !== 0 && e.pointerType === 'mouse') return
-				try { e.currentTarget.setPointerCapture(e.pointerId) } catch (err) { /* ignore */ }
-				dragRef.current = { dx: e.clientX - (pos ? pos.x : 0), dy: e.clientY - (pos ? pos.y : 0), onMove: null, onUp: null }
-				const onMove = (ev) => setPos({ x: ev.clientX - dragRef.current.dx, y: ev.clientY - dragRef.current.dy })
-				const onUp = () => { endDrag() }
-				dragRef.current.onMove = onMove
-				dragRef.current.onUp = onUp
+			const startDrag = (event) => {
+				if (state.mode !== 'float' || (event.button !== 0 && event.pointerType === 'mouse')) return
+				const initial = state.pos || { x: Math.max(12, window.innerWidth - 920), y: Math.max(12, window.innerHeight - 720) }
+				const dx = event.clientX - initial.x
+				const dy = event.clientY - initial.y
+				const finish = () => {
+					window.removeEventListener('pointermove', onMove)
+					window.removeEventListener('pointerup', finish)
+					window.removeEventListener('pointercancel', finish)
+					window.removeEventListener('blur', finish)
+					dragRef.current = null
+				}
+				const onMove = (moveEvent) => store.patch(sessionId, { pos: {
+					x: Math.min(Math.max(8, moveEvent.clientX - dx), Math.max(8, window.innerWidth - 120)),
+					y: Math.min(Math.max(8, moveEvent.clientY - dy), Math.max(8, window.innerHeight - 48)),
+				} })
+				dragRef.current = { finish }
 				window.addEventListener('pointermove', onMove)
-				window.addEventListener('pointerup', onUp)
-				window.addEventListener('pointercancel', onUp)
-				window.addEventListener('blur', onUp)
+				window.addEventListener('pointerup', finish)
+				window.addEventListener('pointercancel', finish)
+				window.addEventListener('blur', finish)
 			}
 
-			const editorUrl = window.location.origin + '/pen-editor/index.html'
-			const isSplit = store.mode === 'split'
+			const isSplit = state.mode === 'split'
+			const position = state.pos || { x: Math.max(12, window.innerWidth - 920), y: Math.max(12, window.innerHeight - 720) }
 			const style = isSplit
-				? { display: store.open ? 'flex' : 'none', right: 0, top: 0, bottom: 0, width: (wide || 720) + 'px' }
-				: { display: store.open ? 'flex' : 'none', left: pos ? pos.x : 0, top: pos ? pos.y : 0, width: 900, maxWidth: '96vw', height: 'min(700px, 90vh)' }
-			const cls = 'dsh-penhost-panel' + (isSplit ? ' dsh-penhost-split' : ' dsh-penhost-float')
-			return React.createElement('div', { className: cls, style: style },
+				? { right: 0, top: 0, bottom: 0, width: effectiveWide + 'px' }
+				: { left: position.x, top: position.y, width: 900, maxWidth: '96vw', height: 'min(700px, 90vh)' }
+			const editorUrl = '/pen-editor/index.html?binding=' + encodeURIComponent(state.binding)
+			return React.createElement('div', {
+				className: 'dsh-penhost-panel' + (isSplit ? ' dsh-penhost-split' : ' dsh-penhost-float'),
+				style,
+				hidden: !active || !state.open,
+				'data-pen-session': sessionId,
+			},
 				isSplit ? React.createElement('div', { className: 'dsh-penhost-resize', title: '拖动调整宽度', onPointerDown: startResize }) : null,
 				React.createElement('div', { className: 'dsh-penhost-head', onPointerDown: startDrag },
 					React.createElement('strong', null, '✏ pen.dev 画布'),
-					React.createElement('span', null, isSplit ? '右侧分屏 · 默认 50% · 拖动左缘调宽 · 自动保存' : '浮动窗口 · 按住标题拖动'),
+					React.createElement('span', { title: state.file || '' }, isSplit ? '当前会话 · 右侧分屏 · 自动保存' : '当前会话 · 浮动窗口 · 自动保存'),
 					React.createElement('button', {
 						className: 'dsh-penhost-mode',
 						title: isSplit ? '切换为浮动窗口' : '切换为右侧分屏',
-						onClick: () => store.setMode(isSplit ? 'float' : 'split'),
+						onPointerDown: (event) => event.stopPropagation(),
+						onClick: () => store.patch(sessionId, { mode: isSplit ? 'float' : 'split' }),
 					}, isSplit ? '浮动' : '分屏'),
-					React.createElement('button', { className: 'dsh-penhost-close', title: '关闭', onClick: () => store.setOpen(false) }, '✕')),
+					React.createElement('button', {
+						className: 'dsh-penhost-close', title: '关闭',
+						onPointerDown: (event) => event.stopPropagation(),
+						onClick: () => store.patch(sessionId, { open: false }),
+					}, '✕')),
 				React.createElement('div', { className: 'dsh-penhost-body' },
-					React.createElement('iframe', {
-						className: 'dsh-penhost-frame',
-						src: editorUrl,
-						title: 'pen.dev 画布编辑器',
-						allow: 'clipboard-read; clipboard-write',
-					})))
+					React.createElement('iframe', { className: 'dsh-penhost-frame', src: editorUrl, title: 'pen.dev 画布编辑器', allow: 'clipboard-read; clipboard-write' })))
+		}
+
+		function PenOverlay(props) {
+			const snapshot = useBridgeSnapshot(props.store)
+			const current = props.useSessions((sessions) => sessions.current)
+			return React.createElement(React.Fragment, null,
+				Object.entries(snapshot.sessions).map(([sessionId, state]) => state.binding
+					? React.createElement(PenCanvas, { key: sessionId, store: props.store, sessionId, state, active: sessionId === current })
+					: null))
 		}
 
 		function PenHeader(props) {
-			const store = props.store
-			const [open, setOpen] = React.useState(store.open)
-			React.useEffect(() => store.subscribe(() => setOpen(store.open)), [])
+			const snapshot = useBridgeSnapshot(props.store)
+			const state = snapshot.sessions[props.sessionId] || EMPTY_SESSION
+			const workspace = props.useSessions((sessions) => sessions.byId[props.sessionId] && sessions.byId[props.sessionId].cwd)
+			const className = 'dsh-penhost-header-btn'
+				+ (state.open ? ' dsh-penhost-header-on' : '')
+				+ (state.error ? ' dsh-penhost-header-error' : '')
 			return React.createElement('button', {
-				className: 'dsh-penhost-header-btn' + (open ? ' dsh-penhost-header-on' : ''),
-				onClick: () => store.setOpen(true),
-				title: '打开 pen.dev 画布',
-			}, '✏ pen.dev 画布')
+				className,
+				disabled: state.loading,
+				onClick: () => { void openForSession(props.store, props.sessionId, workspace) },
+				title: state.error || (workspace ? '在当前会话工作区打开 pen.dev 画布' : '当前会话没有工作区'),
+			}, state.loading ? '✏ 正在绑定…' : state.error ? '✏ 画布出错' : '✏ pen.dev 画布')
 		}
 
 		const name = 'pen-dev-bridge'
-
 		const inject = ['slots']
 
 		function apply(ctx) {
-			const listeners = new Set()
-			const store = {
-				open: false,
-				mode: 'split',
-				wide: 0,
-				listeners: listeners,
-				setOpen(v) {
-					store.open = !!v
-					for (const fn of listeners) fn()
-				},
-				setMode(m) {
-					store.mode = m
-					for (const fn of listeners) fn()
-				},
-				subscribe(fn) {
-					listeners.add(fn)
-					return () => listeners.delete(fn)
-				},
-			}
+			const store = createSessionStore()
 			const disposeStyles = insertStyles()
-			ctx.slots.inject('shell.overlay', () => ctx.slots.register(
+			const disposeOverlay = ctx.slots.inject('shell.overlay', () => ctx.slots.register(
 				{ name: 'shell.overlay', id: 'penhost-canvas', order: 20 },
-				() => (store.open ? React.createElement(PenCanvas, { store }) : null)))
-			ctx.slots.inject('conversation.session.header.actions', () => ctx.slots.register(
+				(props) => React.createElement(PenOverlay, { ...props, store })))
+			const disposeHeader = ctx.slots.inject('conversation.session.header.actions', () => ctx.slots.register(
 				{ name: 'conversation.session.header.actions', id: 'penhost-header', order: 90, label: () => 'pen.dev 画布' },
-				() => React.createElement(PenHeader, { store })))
-			store.setOpen(true)
+				(props) => React.createElement(PenHeader, { ...props, store })))
 			return () => {
+				if (typeof disposeHeader === 'function') disposeHeader()
+				if (typeof disposeOverlay === 'function') disposeOverlay()
+				store.clear()
 				disposeStyles()
 			}
 		}

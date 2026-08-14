@@ -74,12 +74,14 @@ dsh --profile pen-dev-bridge
 | `DSH_PEN_CLI_BIN` / `DSH_PEN_MCP_BIN` | 覆盖 pen CLI / MCP server 二进制路径（默认从 `@pen.dev/cli` 解析） |
 | `DSH_PEN_MCP_APP` | 外部引擎 app 名（默认自动检测，兜底 `desktop`） |
 | `PEN_CLI_KEY` / `PENCIL_CLI_KEY` | pen.dev 组织级 CLI key（优先于会话登录） |
-| `DSH_PEN_EDITOR_DIR` | 浏览器画布编辑器 dist 目录（默认 `<workspace>/pen-editor/out`，即从 `api.pen.dev/public/versions` 下载解压的 `pen-editor-bundle-v0.1.94.zip` 内 `pen-editor/out`） |
-| `DSH_PEN_FILE` | 画布初始打开的 `.pen` 文件（默认 `<workspace>/designs/login.pen`） |
+| `DSH_PEN_EDITOR_DIR` | 浏览器画布编辑器 dist 目录；它与会话工作区无关（开发树会尝试使用同级 `pen-editor/out`） |
+| `DSH_PEN_FILE` | 每个会话画布的初始 `.pen` 文件（相对路径按对应会话工作区解析，默认 `designs/design.pen`） |
 
 ## 画布（Browser 半）
 
-- 启动后自动打开右侧分屏：默认 50% 宽，拖动左缘手柄调宽（400px 起）。
+- 启动时不选择工作区、也不自动打开画布。点击会话头部按钮后才绑定该会话工作区；
+  切换会话时隐藏，返回原会话时恢复。
+- 首次打开默认采用 50% 右侧分屏，拖动左缘手柄可调宽（400px 起）。
 - 标题栏可切换 **浮动窗口**（按住标题拖动），✕ 关闭后可从会话头部
   「✏ pen.dev 画布」按钮重新打开。
 - 每 6 秒宿主向编辑器推 `save-document`，编辑器回 `save-resource` 内容落盘到
@@ -100,8 +102,8 @@ JSON Schema 根对象。
 ## 后续（未包含在本 Bundle）
 
 - 画布编辑器 dist（`pen-editor/out`）不在 Bundle 内：首次使用前需从
-  `api.pen.dev/public/versions` 下载 `editor-bundle-v0.1.94.zip` 并解压到
-  `<workspace>/pen-editor/out`（或设置 `DSH_PEN_EDITOR_DIR` 指向已有 dist）。
+  `api.pen.dev/public/versions` 下载 `editor-bundle-v0.1.94.zip`，并通过
+  `DSH_PEN_EDITOR_DIR` 指向解压后的 `pen-editor/out`。
 - 编辑器与宿主之间的私有 IPC 协议（`get-session` / `save-document` / `save-resource` 等）
   随 pen.dev 官方 webview 版本演进，升级 dist 时需同步核对 `lib/index.js` 的
   `handleIpc` 分支。

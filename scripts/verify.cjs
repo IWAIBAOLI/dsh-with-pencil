@@ -86,9 +86,9 @@ try {
     fail('bundle patch must insert { id: pen-dev-bridge, name: pen-dev-bridge }')
   } else ok('bundle patch inserts pen-dev-bridge row')
   const patch = patchText('bundles/pen-dev-bridge-bundle/cordis.patch.yml')
-  if (!patch.includes("inject: ['tools', 'subprocess', 'sandboxPolicy', 'webServer']") && !patch.includes('inject: ["tools", "subprocess", "sandboxPolicy", "webServer"]')) {
-    fail('bundle patch row must inject [tools, subprocess, sandboxPolicy, webServer]')
-  } else ok('bundle patch row injects [tools, subprocess, sandboxPolicy, webServer]')
+  if (!patch.includes("inject: ['tools', 'subprocess', 'sandboxPolicy', 'webServer', 'sessions']") && !patch.includes('inject: ["tools", "subprocess", "sandboxPolicy", "webServer", "sessions"]')) {
+    fail('bundle patch row must inject [tools, subprocess, sandboxPolicy, webServer, sessions]')
+  } else ok('bundle patch row injects [tools, subprocess, sandboxPolicy, webServer, sessions]')
 } catch (err) { fail('bundle patch: ' + err.message) }
 try {
   parseYaml('profiles/pen-dev-bridge-template/cordis.yml')

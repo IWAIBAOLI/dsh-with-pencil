@@ -14,6 +14,8 @@ import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
+import { randomUUID } from 'node:crypto'
+import { fileURLToPath } from 'node:url'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 
 const require = createRequire(import.meta.url)
@@ -62,28 +64,51 @@ export default {
       return
     }
     const { penBin, mcpBin } = resolvePenPaths()
-    const workspace = (policy && policy.workspaceRoot) || process.cwd()
     const cliKey = process.env.PEN_CLI_KEY || process.env.PENCIL_CLI_KEY || ''
     const baseEnv = {}
     if (cliKey) baseEnv.PEN_CLI_KEY = cliKey
 
-    // ---- headless editor engine lifecycle (the DeepSeek-as-agent seat) ----
-    const engine = { handle: null, file: null, ready: Promise.resolve() }
-    function absPath(p) {
+    // Workspaces belong to sessions, not to plugin startup. Resolve the path
+    // boundary only when a tool call is actually made.
+    function workspaceForExec(exec) {
+      const session = exec && exec.agent && exec.agent.session
+      const scoped = policy && typeof policy.resolve === 'function'
+        ? policy.resolve(session ? { session } : {})
+        : undefined
+      const cwd = (scoped && scoped.workspaceRoot) || (session && session.header && session.header.cwd)
+      if (!cwd) throw new Error('pen.dev requires a workspace-backed conversation')
+      return path.resolve(String(cwd))
+    }
+    function absPath(p, workspace) {
       const s = String(p || '')
       return path.isAbsolute(s) ? s : path.join(workspace, s)
     }
-    function stopEngine() {
+
+    // One engine per conversation prevents concurrent sessions from changing
+    // each other's current document.
+    const engines = new Map()
+    function engineFor(exec) {
+      const workspace = workspaceForExec(exec)
+      const key = String(exec && exec.agent && exec.agent.session && exec.agent.session.id || workspace)
+      let engine = engines.get(key)
+      if (!engine) {
+        engine = { key, workspace, handle: null, file: null, ready: Promise.resolve() }
+        engines.set(key, engine)
+      }
+      return engine
+    }
+    function stopEngine(engine) {
       if (engine.handle) {
         try { engine.handle.terminate() } catch (err) { /* ignore */ }
         engine.handle = null
         engine.file = null
       }
     }
-    function ensureEngine(filePath, signal) {
-      const target = absPath(filePath)
+    function ensureEngine(filePath, exec) {
+      const engine = engineFor(exec)
+      const target = absPath(filePath, engine.workspace)
       if (engine.handle && engine.file === target) return engine.ready
-      stopEngine()
+      stopEngine(engine)
       engine.file = target
       // `--out` starts from an EMPTY canvas and never loads existing content;
       // on an existing file use `--in target --out target` so prior saves load.
@@ -92,11 +117,11 @@ export default {
         : [penBin, 'interactive', '--out', target]
       const handle = sub.spawn({
         argv,
-        cwd: workspace,
+        cwd: engine.workspace,
         // Engine readiness logs land on STDOUT ("Ready."), not stderr.
         stdio: { stdin: 'pipe', stdout: 'pipe', stderr: 'ignore' },
         graceMs: 2000,
-        signal,
+        signal: exec.signal,
         env: baseEnv,
       })
       engine.handle = handle
@@ -119,20 +144,23 @@ export default {
         deadline.addEventListener('abort', onAbort)
         if (handle.stdout) handle.stdout.on('data', onData)
         handle.done.then(onExit, onExit)
-      }).catch((err) => { stopEngine(); throw err })
+      }).catch((err) => { stopEngine(engine); throw err })
       return engine.ready
     }
-    function saveEngine() {
+    function saveEngine(engine) {
       if (engine.handle && engine.handle.stdin) {
         try { engine.handle.stdin.write('save()\n') } catch (err) { /* ignore */ }
       }
     }
-    ctx.effect(() => stopEngine)
+    ctx.effect(() => () => {
+      for (const engine of engines.values()) stopEngine(engine)
+      engines.clear()
+    })
 
     // ---- detect an external pen.dev editor app name (desktop / IDE) ----
     let appNameCache = null
-    function detectApp() {
-      if (engine.handle) return 'cli'
+    function detectApp(engine) {
+      if (engine && engine.handle) return 'cli'
       if (appNameCache) return appNameCache
       appNameCache = process.env.DSH_PEN_MCP_APP || 'desktop'
       try {
@@ -145,6 +173,7 @@ export default {
 
     // ---- run the official pen CLI once ----
     async function runCli(args, opts) {
+      const workspace = workspaceForExec(opts.exec)
       let argv = [penBin].concat(args)
       let executable = null
       try { fs.accessSync(penBin, fs.constants.X_OK) } catch (err) { executable = process.execPath; argv = [penBin].concat(args) }
@@ -171,7 +200,7 @@ export default {
     }
 
     // ---- stdio MCP client for the bundled Pencil MCP server ----
-    function mcpClient(appName) {
+    function mcpClient(appName, workspace) {
       const handle = sub.spawn({
         argv: [mcpBin, '--app', appName],
         cwd: workspace,
@@ -214,19 +243,21 @@ export default {
     }
 
     async function runMcp(tool, args, opts) {
-      let appName = detectApp()
+      const workspace = workspaceForExec(opts.exec)
+      const engine = engineFor(opts.exec)
+      let appName = detectApp(engine)
       // Engine file may differ from the MCP argument filePath (get_screenshot
       // must not receive filePath, but still needs the engine on that file).
       const fileArg = (opts && opts.filePath) || (args && args.filePath)
       if (fileArg) {
         try {
-          await ensureEngine(fileArg, opts.signal)
+          await ensureEngine(fileArg, opts.exec)
           appName = 'cli'
         } catch (err) {
           return { ok: false, text: 'engine start failed: ' + (err && err.message ? err.message : String(err)) }
         }
       }
-      const client = mcpClient(appName)
+      const client = mcpClient(appName, workspace)
       try {
         await withSignal(client.init(), opts.signal)
         const raced = Promise.race([
@@ -238,7 +269,7 @@ export default {
           return { ok: false, text: 'MCP error: ' + String((res.error.message || JSON.stringify(res.error))).slice(0, 4000) }
         }
         if (tool === 'execute' || tool === 'export_html' || tool === 'export_nodes') {
-          setTimeout(() => saveEngine(), 400)
+          setTimeout(() => saveEngine(engine), 400)
         }
         const content = res && res.result && res.result.content
         const text = Array.isArray(content)
@@ -278,8 +309,8 @@ export default {
 
     register('pencil_status', 'Check pen.dev (pencil.dev) authentication status by running the official `pen status` CLI. Run this first before any design work to see whether you are logged in and with which account.',
       {},
-      async () => {
-        const r = await runCli(['status'], {})
+      async (args, exec) => {
+        const r = await runCli(['status'], { exec, signal: exec.signal })
         const text = (r.stdout || r.stderr || '').trim() || ('pen status exited with ' + r.exitCode)
         return { ok: r.exitCode === 0, text }
       }, 60000)
@@ -289,20 +320,20 @@ export default {
         email: { type: 'string', required: true, description: 'Your pen.dev account email.' },
         code: { type: 'string', description: 'The OTP code emailed after the first call (omit on the first call).' },
       },
-      async (args) => {
+      async (args, exec) => {
         const email = String(args.email || '').trim()
         if (!email) return { ok: false, text: 'email is required' }
         const argv = ['login', '--email', email]
         if (args.code) argv.push('--code', String(args.code).trim())
-        const r = await runCli(argv, {})
+        const r = await runCli(argv, { exec, signal: exec.signal })
         const text = (r.stdout || r.stderr || '').trim() || ('pen login exited with ' + r.exitCode)
         return { ok: r.exitCode === 0, text }
       }, 90000)
 
     register('pencil_workspaces', 'List your pen.dev organizations and workspaces by running `pen --list-workspaces`. Useful to pick a --workspace slug for pencil_design.',
       {},
-      async () => {
-        const r = await runCli(['--list-workspaces'], {})
+      async (args, exec) => {
+        const r = await runCli(['--list-workspaces'], { exec, signal: exec.signal })
         const text = (r.stdout || r.stderr || '').trim() || ('pen --list-workspaces exited with ' + r.exitCode)
         return { ok: r.exitCode === 0, text }
       }, 60000)
@@ -332,7 +363,7 @@ export default {
           argv.push('--export', String(args.export))
           if (args.exportType) argv.push('--export-type', String(args.exportType))
         }
-        const r = await runCli(argv, { signal: exec.signal })
+        const r = await runCli(argv, { exec, signal: exec.signal })
         const tail = (r.stdout || '').trim()
         const err = (r.stderr || '').trim()
         let text = tail || err || ('pen design agent exited with ' + r.exitCode)
@@ -352,7 +383,7 @@ export default {
         const out = String(args.out || 'export').trim()
         const argv = ['--in', inp, '--export', out]
         if (args.type) argv.push('--export-type', String(args.type))
-        const r = await runCli(argv, { signal: exec.signal })
+        const r = await runCli(argv, { exec, signal: exec.signal })
         const text = (r.stdout || r.stderr || '').trim() || ('pen export exited with ' + r.exitCode)
         return { ok: r.exitCode === 0 && !r.aborted, text }
       }, 180000)
@@ -365,17 +396,19 @@ export default {
         const filePath = String(args.filePath || '').trim()
         if (!filePath) return { ok: false, text: 'filePath is required' }
         try {
-          await ensureEngine(filePath, exec.signal)
+          await ensureEngine(filePath, exec)
         } catch (err) {
           return { ok: false, text: 'engine start failed: ' + (err && err.message ? err.message : String(err)) }
         }
-        const client = mcpClient('cli')
+        const workspace = workspaceForExec(exec)
+        const target = absPath(filePath, workspace)
+        const client = mcpClient('cli', workspace)
         try {
           await withSignal(client.init(), exec.signal)
-          const res = await withSignal(client.call('tools/call', { name: 'get_app_state', arguments: { filePath: absPath(filePath), include_schema: false, include_canvas_design: false, include_scripts_and_shaders: false } }), exec.signal)
+          const res = await withSignal(client.call('tools/call', { name: 'get_app_state', arguments: { filePath: target, include_schema: false, include_canvas_design: false, include_scripts_and_shaders: false } }), exec.signal)
           const content = res && res.result && res.result.content
           const text = Array.isArray(content) ? content.map((c) => (c && c.text != null ? c.text : '')).join('\n') : JSON.stringify(res && res.result)
-          return { ok: !(res && res.result && res.result.isError), text: 'Engine ready on ' + absPath(filePath) + '.\n\n' + text.slice(0, 4000) }
+          return { ok: !(res && res.result && res.result.isError), text: 'Engine ready on ' + target + '.\n\n' + text.slice(0, 4000) }
         } catch (err) {
           return { ok: false, text: 'MCP call failed: ' + (err && err.message ? err.message : String(err)) }
         } finally {
@@ -395,8 +428,9 @@ export default {
           include_canvas_design: !!args.include_canvas_design,
           include_scripts_and_shaders: !!args.include_scripts_and_shaders,
         }
+        const engine = engineFor(exec)
         if (engine.file) a.filePath = engine.file
-        return runMcp('get_app_state', a, { signal: exec.signal })
+        return runMcp('get_app_state', a, { exec, signal: exec.signal })
       }, 120000)
 
     register('pencil_mcp_get_guidelines', 'Official Pencil MCP tool: load guides and styles for working with .pen files. Call with no args to list available guides/styles, then load one by {category: guide|style, name}.',
@@ -410,7 +444,7 @@ export default {
         if (args.category) a.category = args.category
         if (args.name) a.name = args.name
         if (args.params) a.params = args.params
-        return runMcp('get_guidelines', a, { signal: exec.signal })
+        return runMcp('get_guidelines', a, { exec, signal: exec.signal })
       }, 120000)
 
     register('pencil_mcp_execute', 'Official Pencil MCP tool: modify a .pen document by running a JavaScript snippet (Insert/Get/Set/Print etc., see get_app_state with include_schema for the schema). filePath is the .pen file. On failure, the server returns an editId — retry with {editId, edits:[{find, replace}]} instead of resending input. .pen files are encrypted; never read/write them with the fs tools. Changes are saved to the file after each successful call.',
@@ -433,12 +467,13 @@ export default {
         },
       },
       async (args, exec) => {
-        const a = { filePath: absPath(String(args.filePath || '')) }
+        const workspace = workspaceForExec(exec)
+        const a = { filePath: absPath(String(args.filePath || ''), workspace) }
         if (args.input) a.input = String(args.input)
         if (args.editId) a.editId = String(args.editId)
         if (args.edits) a.edits = args.edits
         if (!a.input && !a.editId) return { ok: false, text: 'filePath and input (or editId+edits) are required' }
-        return runMcp('execute', a, { signal: exec.signal })
+        return runMcp('execute', a, { exec, signal: exec.signal })
       }, 300000)
 
     register('pencil_mcp_get_screenshot', 'Official Pencil MCP tool: take a screenshot of a node in a .pen file (nodeId "document" for the whole file). Use sparingly to verify visual fidelity after edits.',
@@ -449,9 +484,9 @@ export default {
       async (args, exec) => {
         // get_screenshot must NOT receive filePath (the server rejects it);
         // the engine is still started on the file via opts.filePath.
-        const fp = absPath(String(args.filePath || ''))
+        const fp = absPath(String(args.filePath || ''), workspaceForExec(exec))
         const nodeId = String(args.nodeId || 'document')
-        return runMcp('get_screenshot', { nodeId }, { filePath: fp, signal: exec.signal })
+        return runMcp('get_screenshot', { nodeId }, { exec, filePath: fp, signal: exec.signal })
       }, 120000)
 
     register('pencil_mcp_export_html', 'Official Pencil MCP tool: export .pen nodes to HTML (html-tailwind or html-css) at outputPath. Image assets are referenced with relative paths.',
@@ -465,13 +500,14 @@ export default {
         includeLayerNames: { type: 'boolean', description: 'Include layer names as data attributes (default true).' },
       },
       async (args, exec) => {
-        const a = { filePath: absPath(String(args.filePath || '')), nodeIds: Array.isArray(args.nodeIds) ? args.nodeIds : [], outputPath: absPath(String(args.outputPath || '')) }
+        const workspace = workspaceForExec(exec)
+        const a = { filePath: absPath(String(args.filePath || ''), workspace), nodeIds: Array.isArray(args.nodeIds) ? args.nodeIds : [], outputPath: absPath(String(args.outputPath || ''), workspace) }
         if (!a.filePath || !a.outputPath || !a.nodeIds.length) return { ok: false, text: 'filePath, nodeIds and outputPath are required' }
         if (args.format) a.format = args.format
         if (args.includeHtmlScaffold !== undefined) a.includeHtmlScaffold = !!args.includeHtmlScaffold
         if (args.includeLayerIds !== undefined) a.includeLayerIds = !!args.includeLayerIds
         if (args.includeLayerNames !== undefined) a.includeLayerNames = !!args.includeLayerNames
-        return runMcp('export_html', a, { signal: exec.signal })
+        return runMcp('export_html', a, { exec, signal: exec.signal })
       }, 180000)
 
     register('pencil_mcp_export_nodes', 'Official Pencil MCP tool: export .pen nodes to image files (PNG/JPEG/WEBP/PDF, 2x scale) into outputDir, one file per node.',
@@ -484,25 +520,24 @@ export default {
         scale: { type: 'number', description: 'Scale factor (default 2).' },
       },
       async (args, exec) => {
-        const a = { filePath: absPath(String(args.filePath || '')), nodeIds: Array.isArray(args.nodeIds) ? args.nodeIds : [], outputDir: absPath(String(args.outputDir || '')) }
+        const workspace = workspaceForExec(exec)
+        const a = { filePath: absPath(String(args.filePath || ''), workspace), nodeIds: Array.isArray(args.nodeIds) ? args.nodeIds : [], outputDir: absPath(String(args.outputDir || ''), workspace) }
         if (!a.filePath || !a.outputDir || !a.nodeIds.length) return { ok: false, text: 'filePath, nodeIds and outputDir are required' }
         if (args.format) a.format = args.format
         if (args.quality !== undefined) a.quality = Number(args.quality)
         if (args.scale !== undefined) a.scale = Number(args.scale)
-        return runMcp('export_nodes', a, { signal: exec.signal })
+        return runMcp('export_nodes', a, { exec, signal: exec.signal })
       }, 180000)
 
-    // ---- pen.dev canvas UI host: editor static routes + IPC bridge + autosave ----
-    // Serves the pen-editor dist under /pen-editor, the vscodeapi postMessage
-    // bridge under /pen-host/*, and keeps the browser editor in sync with the
-    // local .pen file (save-document polling + save-resource writes).
+    // ---- pen.dev canvas UI host: session-bound editor + IPC bridge ----
     const webServer = ctx.get('webServer')
     if (webServer !== undefined) {
-      const editorDir = process.env.DSH_PEN_EDITOR_DIR || path.join(workspace, 'pen-editor', 'out')
-      const stateFile = path.join(workspace, '.pen-host-state.json')
+      const packageDir = path.dirname(fileURLToPath(import.meta.url))
+      const editorDir = path.resolve(process.env.DSH_PEN_EDITOR_DIR || path.join(packageDir, '../../../../pen-editor/out'))
+      const stateFile = path.resolve(process.env.DSH_PEN_STATE_FILE || path.join(os.homedir(), '.dsh', 'pen-dev-bridge', 'state.json'))
       const sessionCli = path.join(os.homedir(), '.pencil', 'session-cli.json')
       const uiState = { email: '', token: '' }
-      let currentFile = process.env.DSH_PEN_FILE || path.join(workspace, 'designs', 'login.pen')
+      const bindings = new Map()
       const MIME = {
         html: 'text/html', js: 'text/javascript', mjs: 'text/javascript', css: 'text/css',
         json: 'application/json', map: 'application/json', wasm: 'application/wasm',
@@ -511,8 +546,8 @@ export default {
         glsl: 'text/plain', pen: 'application/octet-stream',
       }
       const TEXT_EXT = ['html', 'js', 'mjs', 'css', 'json', 'map', 'svg', 'txt', 'glsl']
-      const hostQueue = []
       let hostMsgSeq = 0
+      let rawIndex
 
       try {
         const s = JSON.parse(fs.readFileSync(stateFile, 'utf8'))
@@ -527,12 +562,13 @@ export default {
         return null
       }
       function persistState() {
-        try { fs.writeFileSync(stateFile, JSON.stringify(uiState, null, 2)) } catch (err) { /* ignore */ }
+        try {
+          fs.mkdirSync(path.dirname(stateFile), { recursive: true })
+          fs.writeFileSync(stateFile, JSON.stringify(uiState, null, 2))
+        } catch (err) { /* ignore */ }
       }
-      function pathnameOf(url) {
-        const s = String(url || '/')
-        const q = s.indexOf('?')
-        return q >= 0 ? s.slice(0, q) : s
+      function urlOf(req) {
+        return new URL(String(req.url || '/'), 'http://127.0.0.1')
       }
       function uriToPath(uri) {
         const s = String(uri || '')
@@ -542,12 +578,35 @@ export default {
         return s
       }
 
-      function injectBootstrap(html) {
+      function bindingOf(req) {
+        return bindings.get(urlOf(req).searchParams.get('binding') || '')
+      }
+      function insideWorkspace(binding, input) {
+        const decoded = uriToPath(input)
+        const target = path.resolve(binding.workspace, decoded)
+        const rel = path.relative(binding.workspace, target)
+        if (rel === '..' || rel.startsWith('..' + path.sep) || path.isAbsolute(rel)) {
+          throw new Error('path escapes the bound session workspace')
+        }
+        return target
+      }
+      function defaultFile(workspace) {
+        const configured = process.env.DSH_PEN_FILE
+        return configured
+          ? (path.isAbsolute(configured) ? configured : path.join(workspace, configured))
+          : path.join(workspace, 'designs', 'design.pen')
+      }
+      function injectBootstrap(html, binding) {
+        const bindingKey = JSON.stringify(binding.key)
+        const penFile = JSON.stringify(binding.currentFile)
         const boot = `
 <script>
+var __penBinding = ${bindingKey};
+var __penFile = ${penFile};
+function __penHostUrl(path) { return path + '?binding=' + encodeURIComponent(__penBinding); }
 window.vscodeapi = {
   postMessage: function (msg) {
-    fetch('/pen-host/ipc', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(msg) })
+    fetch(__penHostUrl('/pen-host/ipc'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(msg) })
       .then(function (r) { return r.json() })
       .then(function (resp) { window.postMessage(resp, '*') })
       .catch(function (err) { console.error('[penhost] ipc error', err) })
@@ -558,7 +617,7 @@ window.vscodeapi = {
 var __penToken = null;
 try {
   var __xhr = new XMLHttpRequest();
-  __xhr.open('GET', '/pen-session-token', false);
+  __xhr.open('GET', __penHostUrl('/pen-session-token'), false);
   __xhr.send();
   if (__xhr.status === 200) { __penToken = JSON.parse(__xhr.responseText).token; }
 } catch (e) {}
@@ -571,10 +630,10 @@ window.PENCIL_INIT_PARAMS = {
   displayName: 'DeepSeek Harness',
   sessionToken: __penToken,
   isTemporary: false,
-  fileURI: 'file://' + (typeof window.__penFile !== 'undefined' ? window.__penFile : '')
+  fileURI: 'file://' + __penFile
 };
 setInterval(function () {
-  fetch('/pen-host/pending', { method: 'GET' })
+  fetch(__penHostUrl('/pen-host/pending'), { method: 'GET' })
     .then(function (r) { return r.json() })
     .then(function (d) {
       if (d && Array.isArray(d.messages)) {
@@ -589,26 +648,36 @@ setInterval(function () {
         if (idx === -1) return html
         return html.slice(0, idx) + boot + '\n    ' + html.slice(idx)
       }
-      let servedIndex = null
-      try {
-        servedIndex = injectBootstrap(fs.readFileSync(path.join(editorDir, 'index.html'), 'utf8'))
-      } catch (err) {
-        console.warn('[pen-dev-bridge] pen-editor index unavailable at ' + editorDir + ': ' + (err && err.message ? err.message : String(err)))
+      function editorIndex() {
+        if (rawIndex !== undefined) return rawIndex
+        try {
+          rawIndex = fs.readFileSync(path.join(editorDir, 'index.html'), 'utf8')
+          return rawIndex
+        } catch (err) {
+          throw new Error('pen-editor unavailable at ' + editorDir + '; set DSH_PEN_EDITOR_DIR')
+        }
       }
 
       const autosaveTimer = setInterval(() => {
-        if (hostQueue.length < 8) {
+        for (const binding of bindings.values()) {
+          if (binding.queue.length >= 8) continue
           hostMsgSeq += 1
-          hostQueue.push({ id: 'host-' + hostMsgSeq + '-' + Date.now(), type: 'request', method: 'save-document', payload: {} })
+          binding.queue.push({ id: 'host-' + hostMsgSeq + '-' + Date.now(), type: 'request', method: 'save-document', payload: {} })
         }
       }, 6000)
       ctx.effect(() => () => clearInterval(autosaveTimer))
 
-      async function serveStatic(req, res, pathname) {
+      async function serveStatic(req, res) {
+        const requestUrl = urlOf(req)
+        const pathname = requestUrl.pathname
         const rel = pathname.slice('/pen-editor'.length) || '/index.html'
         if (rel.indexOf('..') !== -1) { res.writeHead(403); res.end('forbidden'); return }
         if (rel === '/index.html') {
-          if (servedIndex === null) { res.writeHead(503); res.end('pen-editor index not ready'); return }
+          const binding = bindingOf(req)
+          if (!binding) { res.writeHead(401); res.end('bind the canvas to a conversation first'); return }
+          let servedIndex
+          try { servedIndex = injectBootstrap(editorIndex(), binding) }
+          catch (err) { res.writeHead(503); res.end(err.message); return }
           res.writeHead(200, { 'Content-Type': 'text/html' })
           res.end(servedIndex)
           return
@@ -634,16 +703,52 @@ setInterval(function () {
         }
       }
 
-      async function handleIpc(req, res) {
+      async function readBody(req) {
         let body = ''
-        try {
-          for await (const chunk of req) body += chunk
-        } catch (err) { /* ignore */ }
+        for await (const chunk of req) {
+          body += chunk
+          if (body.length > 64 * 1024 * 1024) throw new Error('request too large')
+        }
+        return JSON.parse(body || '{}')
+      }
+      async function handleBind(req, res) {
+        let body
+        try { body = await readBody(req) }
+        catch (err) { res.writeHead(400); res.end('bad json'); return }
+        const sessionId = String(body.sessionId || '')
+        if (!sessionId) { res.writeHead(400); res.end('sessionId is required'); return }
+        const live = ctx.sessions && typeof ctx.sessions.get === 'function' ? ctx.sessions.get(sessionId) : undefined
+        const liveCwd = live && live.header && live.header.cwd ? path.resolve(String(live.header.cwd)) : undefined
+        const requestedCwd = body.workspace ? path.resolve(String(body.workspace)) : undefined
+        if (liveCwd && requestedCwd && liveCwd !== requestedCwd) {
+          res.writeHead(409); res.end('workspace does not match the conversation'); return
+        }
+        const workspace = liveCwd || requestedCwd
+        if (!workspace || !path.isAbsolute(workspace)) {
+          res.writeHead(409); res.end('conversation has no workspace'); return
+        }
+        const existing = [...bindings.values()].find((item) => item.sessionId === sessionId)
+        if (existing) {
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ binding: existing.key, workspace: existing.workspace, file: existing.currentFile }))
+          return
+        }
+        const key = randomUUID()
+        const binding = { key, sessionId, workspace, currentFile: defaultFile(workspace), queue: [] }
+        bindings.set(key, binding)
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ binding: key, workspace, file: binding.currentFile }))
+      }
+      async function handleIpc(req, res) {
+        const binding = bindingOf(req)
+        if (!binding) { res.writeHead(401); res.end('invalid canvas binding'); return }
         let msg
-        try { msg = JSON.parse(body) } catch (err) { res.writeHead(400); res.end('bad json'); return }
+        try { msg = await readBody(req) }
+        catch (err) { res.writeHead(400); res.end('bad json'); return }
         if (msg.type === 'notification') {
           if (msg.method === 'set-current-file') {
-            currentFile = uriToPath(msg.payload && msg.payload.uri)
+            try { binding.currentFile = insideWorkspace(binding, msg.payload && msg.payload.uri) }
+            catch (err) { res.writeHead(403); res.end('forbidden'); return }
           } else if (msg.method === 'set-session') {
             if (msg.payload && msg.payload.token) {
               uiState.email = msg.payload.email || ''
@@ -651,9 +756,11 @@ setInterval(function () {
               persistState()
             }
           } else if (msg.method === 'save-resource') {
-            if (currentFile && msg.payload && msg.payload.content !== undefined) {
+            if (binding.currentFile && msg.payload && msg.payload.content !== undefined) {
               try {
-                await fsp.writeFile(currentFile, String(msg.payload.content))
+                const target = insideWorkspace(binding, binding.currentFile)
+                await fsp.mkdir(path.dirname(target), { recursive: true })
+                await fsp.writeFile(target, String(msg.payload.content))
               } catch (err) { console.error('[pen-dev-bridge] save failed', err && err.message) }
             }
           }
@@ -669,28 +776,27 @@ setInterval(function () {
         let out
         switch (msg.method) {
           case 'get-session': out = { token: sessionToken() }; break
-          case 'get-current-workspace': out = { label: 'DeepSeek Harness', rootPath: workspace }; break
+          case 'get-current-workspace': out = { label: 'DeepSeek Harness', rootPath: binding.workspace }; break
           case 'get-device-id': out = { deviceId: 'dsh-local' }; break
           case 'get-last-online-at': out = { lastOnlineAt: Date.now() }; break
           case 'read-file': {
-            const p = uriToPath(payload.uri)
-            try { out = { content: await fsp.readFile(p, 'utf8') } }
+            try { out = { content: await fsp.readFile(insideWorkspace(binding, payload.uri), 'utf8') } }
             catch (err) { out = { content: '' } }
             break
           }
           case 'stat-file': {
-            const p = uriToPath(payload.uri)
             try {
-              const st = await fsp.stat(p)
+              const st = await fsp.stat(insideWorkspace(binding, payload.uri))
               out = { exists: true, isFile: st.isFile() }
             } catch (err) { out = { exists: false, isFile: false } }
             break
           }
           case 'find-libraries': {
             try {
-              const libs = fs.readdirSync(path.join(workspace, 'pen-dev-mcp', 'node_modules', '@pen.dev', 'cli', 'dist', 'out', 'data'))
+              const dataDir = path.join(path.dirname(mcpBin), 'data')
+              const libs = fs.readdirSync(dataDir)
                 .filter((n) => n.endsWith('.lib.pen'))
-                .map((n) => 'file://' + path.join(workspace, 'pen-dev-mcp', 'node_modules', '@pen.dev', 'cli', 'dist', 'out', 'data', n))
+                .map((n) => 'file://' + path.join(dataDir, n))
               out = libs
             } catch (err) { out = [] }
             break
@@ -710,24 +816,28 @@ setInterval(function () {
 
       const routeDisposers = []
       routeDisposers.push(webServer.register({ kind: 'prefix', path: '/pen-editor', handler: (req, res) => {
-        serveStatic(req, res, pathnameOf(req.url)).catch((err) => {
+        serveStatic(req, res).catch((err) => {
           try { res.writeHead(500); res.end('serve error') } catch (err2) { /* ignore */ }
         })
       } }))
+      routeDisposers.push(webServer.register({ kind: 'exact', path: '/pen-host/bind', handler: handleBind }))
       routeDisposers.push(webServer.register({ kind: 'exact', path: '/pen-host/ipc', handler: handleIpc }))
       routeDisposers.push(webServer.register({ kind: 'exact', path: '/pen-host/pending', handler: async (req, res) => {
-        const messages = hostQueue.splice(0, hostQueue.length)
+        const binding = bindingOf(req)
+        if (!binding) { res.writeHead(401); res.end('invalid canvas binding'); return }
+        const messages = binding.queue.splice(0, binding.queue.length)
         res.writeHead(200, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ messages: messages }))
       } }))
       routeDisposers.push(webServer.register({ kind: 'exact', path: '/pen-session-token', handler: async (req, res) => {
+        if (!bindingOf(req)) { res.writeHead(401); res.end('invalid canvas binding'); return }
         res.writeHead(200, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ token: sessionToken() }))
       } }))
       for (const d of routeDisposers) if (d) ctx.effect(() => d)
-      console.log('[pen-dev-bridge] pen.dev canvas served at /pen-editor (dist=' + editorDir + ', file=' + currentFile + ')')
+      console.log('[pen-dev-bridge] pen.dev canvas routes ready at /pen-editor (binds workspace on conversation trigger)')
     }
 
-    console.log(`[pen-dev-bridge] registered 12 pencil_* tools (pen=${penBin}, mcp=${mcpBin}, workspace=${workspace})`)
+    console.log(`[pen-dev-bridge] registered 12 pencil_* tools (pen=${penBin}, mcp=${mcpBin}; workspace resolves per call)`)
   },
 }
