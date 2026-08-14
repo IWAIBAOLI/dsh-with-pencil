@@ -43,8 +43,13 @@ Bridge 只负责把模型工具、当前会话和用户看到的 Pencil 画布�
 
 ```text
 packages/pen-dev-bridge/
-  lib/index.js              工具注册和 Canvas Host
+  lib/index.js              依赖解析与三个运行边界的启动编排
   lib/headless-runtime.js   官方 CLI/MCP 引擎生命周期
+  lib/model-tools.js        7 个核心模型工具与截图附件输出
+  lib/canvas-host.js        会话绑定、文档保存、editor IPC 路由
+  lib/canvas-transport.js   请求队列、长轮询、取消和响应配对
+  lib/editor-assets.js      官方 editor dist 定位、注入与静态响应
+  lib/session-store.js      Browser/CLI 登录态复用与安全落盘
   lib/workspace-path.js     session 工作区与路径边界
   lib/legacy-tools.js       可选的一次性 CLI 工具
   lib/client.js             Harness Browser 分屏/浮动画布
@@ -54,6 +59,7 @@ profiles/pen-dev-bridge-template/
   package.json              开发用示例 profile
 tests/
   live-canvas.test.mjs      真实协议形状的 Agent/Canvas 模拟
+  host-components.test.mjs  editor 资源注入与登录态权限
   workspace-path.test.mjs   路径与符号链接边界
 scripts/verify.cjs          包结构和关键约束检查
 ```
@@ -111,6 +117,7 @@ pen.dev 的授权，因此目前不会把官方 dist 直接提交进本仓库。
 
 ```bash
 node scripts/verify.cjs
+node tests/host-components.test.mjs
 node tests/workspace-path.test.mjs
 node tests/live-canvas.test.mjs
 ```

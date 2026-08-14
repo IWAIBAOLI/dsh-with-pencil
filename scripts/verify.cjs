@@ -112,6 +112,11 @@ console.log('[4] plugin entry syntax')
 let pluginSource = ''
 let workspacePathSource = ''
 let headlessSource = ''
+let modelToolsSource = ''
+let canvasHostSource = ''
+let canvasTransportSource = ''
+let editorAssetsSource = ''
+let sessionStoreSource = ''
 try {
   const pluginPath = path.join(root, 'packages/pen-dev-bridge/lib/index.js')
   execFileSync(process.execPath, ['--check', pluginPath], { stdio: 'pipe' })
@@ -142,6 +147,22 @@ try {
 } catch (err) {
   fail('lib/legacy-tools.js: ' + (err.stderr ? err.stderr.toString() : err.message))
 }
+for (const [name, assign] of [
+  ['model-tools.js', (source) => { modelToolsSource = source }],
+  ['canvas-host.js', (source) => { canvasHostSource = source }],
+  ['canvas-transport.js', (source) => { canvasTransportSource = source }],
+  ['editor-assets.js', (source) => { editorAssetsSource = source }],
+  ['session-store.js', (source) => { sessionStoreSource = source }],
+]) {
+  try {
+    const modulePath = path.join(root, 'packages/pen-dev-bridge/lib', name)
+    execFileSync(process.execPath, ['--check', modulePath], { stdio: 'pipe' })
+    assign(fs.readFileSync(modulePath, 'utf8'))
+    ok(`lib/${name} parses as ESM`)
+  } catch (err) {
+    fail(`lib/${name}: ` + (err.stderr ? err.stderr.toString() : err.message))
+  }
+}
 try {
   execFileSync(process.execPath, ['--check', path.join(root, 'packages/pen-dev-bridge/lib/client.js')], { stdio: 'pipe' })
   ok('lib/client.js parses (browser bundle)')
@@ -151,13 +172,13 @@ try {
 
 // 4a. defineTool accepts a property map, not a complete JSON Schema object.
 console.log('[4a] tool parameter schema dialect')
-if (!pluginSource.includes('parameters: parameterProperties')) {
+if (!modelToolsSource.includes('parameters: parameterProperties')) {
   fail('register helper must pass the DSH parameter property map directly')
 } else ok('register helper passes a parameter property map')
-if (/required\s*:\s*\[/.test(pluginSource)) {
+if (/required\s*:\s*\[/.test(modelToolsSource)) {
   fail('tool schemas must mark each required property with required: true, not use JSON Schema required arrays')
 } else ok('required parameters use per-property required: true')
-if (pluginSource.includes("{ type: 'object', additionalProperties: true, properties: {}, required: [] }")) {
+if (modelToolsSource.includes("{ type: 'object', additionalProperties: true, properties: {}, required: [] }")) {
   fail('zero-argument tools must use an empty parameter property map')
 } else ok('zero-argument tools use empty property maps')
 
@@ -198,31 +219,31 @@ try {
 // 4c. The host must not derive a workspace from its launch directory. Both
 // model tools and the browser canvas resolve the owning session at use time.
 console.log('[4c] session workspace binding')
-if (pluginSource.includes('process.cwd()')) {
+if ((pluginSource + canvasHostSource + modelToolsSource).includes('process.cwd()')) {
   fail('host must not use process.cwd() as a workspace fallback')
 } else ok('host has no process.cwd() workspace fallback')
-if (!pluginSource.includes('function workspaceForExec(exec)') || !pluginSource.includes("path: '/pen-host/bind'")) {
+if (!pluginSource.includes('function workspaceForExec(exec)') || !canvasHostSource.includes("path: '/pen-host/bind'")) {
   fail('host must resolve tool workspaces per call and expose the canvas bind route')
 } else ok('host resolves workspaces per call and exposes the bind route')
-if (!pluginSource.includes("path: '/pen-host/files'") || !pluginSource.includes("path: '/pen-host/file'") || !pluginSource.includes("path: '/pen-host/reveal'")) {
+if (!canvasHostSource.includes("path: '/pen-host/files'") || !canvasHostSource.includes("path: '/pen-host/file'") || !canvasHostSource.includes("path: '/pen-host/reveal'")) {
   fail('host must expose bound .pen file selection and workspace reveal routes')
 } else ok('host exposes bound .pen file selection and workspace reveal routes')
-if (!pluginSource.includes("case 'get-session': out = sessionState()") || !pluginSource.includes('return { email: uiState.email, token: uiState.token }')) {
+if (!canvasHostSource.includes("case 'get-session': out = sessionStore.get()") || !sessionStoreSource.includes("return { email: state.email, token: state.token }")) {
   fail('new conversation canvases must reuse profile-level email and token')
 } else ok('new conversation canvases reuse profile-level email and token')
-if (!pluginSource.includes('function __penDecodeResponse(resp)') || !pluginSource.includes("out = { __penBinaryBase64: content.toString('base64') }") || pluginSource.includes('insideWorkspace(binding, payload.uri)')) {
+if (!editorAssetsSource.includes('function __penDecodeResponse(resp)') || !canvasHostSource.includes("out = { __penBinaryBase64: content.toString('base64') }") || canvasHostSource.includes('insideWorkspace(binding, payload.uri)')) {
   fail('editor file IPC must transport raw URI payloads and binary file content')
 } else ok('editor file IPC transports raw URI payloads and binary file content')
-if (!pluginSource.includes("const EDITOR_SCHEMA_VERSION = '2.14'") || !pluginSource.includes('document.version !== EDITOR_SCHEMA_VERSION') || !pluginSource.includes('async function queueCurrentFile(binding)') || !pluginSource.includes("msg.method === 'initialized'") || !pluginSource.includes("method: 'file-update'")) {
+if (!canvasHostSource.includes("const EDITOR_SCHEMA_VERSION = '2.14'") || !canvasHostSource.includes('document.version !== EDITOR_SCHEMA_VERSION') || !canvasHostSource.includes('async function queueCurrentFile(binding)') || !canvasHostSource.includes("msg.method === 'initialized'") || !canvasHostSource.includes("transport.notify(binding, 'file-update'")) {
   fail('host must push the selected document after the editor initializes')
 } else ok('host pushes the selected document after editor initialization')
-if (!pluginSource.includes('binding.loadedFile !== binding.currentFile') || !pluginSource.includes('(binding.saveRequested || Date.now() >= binding.autosaveAfter)') || !pluginSource.includes('async function saveCanvas(binding)') || !pluginSource.includes('writeFileAtomic')) {
+if (!canvasHostSource.includes('binding.loadedFile !== binding.currentFile') || !canvasHostSource.includes('(binding.saveRequested || Date.now() >= binding.autosaveAfter)') || !canvasHostSource.includes('async function saveCanvas(binding)') || !canvasHostSource.includes('writeFileAtomic')) {
   fail('autosave must wait for a successful file load and write atomically')
 } else ok('autosave waits for a successful file load and writes atomically')
-if (!pluginSource.includes("execute: 'batch-design'") || !headlessSource.includes('return canvasBridge.run(tool') || !pluginSource.includes("Saved by live canvas:") || !pluginSource.includes('function requestCanvas(')) {
+if (!canvasHostSource.includes("execute: 'batch-design'") || !headlessSource.includes('return canvasBridge.run(tool') || !canvasHostSource.includes("Saved by live canvas:") || !canvasHostSource.includes('transport.request(binding')) {
   fail('open conversation canvases must receive MCP edits through their own editor IPC')
 } else ok('MCP edits route directly through the open conversation canvas')
-if (!pluginSource.includes('function __penPoll()') || !pluginSource.includes('binding.pollWaiters.push(waiter)') || !pluginSource.includes("path: '/pen-host/state'")) {
+if (!editorAssetsSource.includes('function __penPoll()') || !canvasTransportSource.includes('binding.pollWaiters.push(waiter)') || !canvasHostSource.includes("path: '/pen-host/state'")) {
   fail('live canvas IPC must use low-latency polling and expose synchronized binding state')
 } else ok('live canvas IPC uses low-latency polling with synchronized binding state')
 if (!headlessSource.includes("get_app_state: ['get_app_state', 'get_editor_state']") || !headlessSource.includes("execute: ['execute', 'batch_design']") || !headlessSource.includes("await call('tools/list', {})")) {
@@ -237,21 +258,32 @@ if (!headlessSource.includes('async function engineCommand(') || !headlessSource
 if (headlessSource.includes('process.kill(pid, 0)') || !headlessSource.includes('process.env.DSH_PEN_MCP_APP') || !headlessSource.includes('No pen.dev engine is bound to this conversation')) {
   fail('external editor routing must be explicit and request an open by default')
 } else ok('external editor routing is opt-in and session-safe by default')
-if (!workspacePathSource.includes('path escapes the bound session workspace') || !workspacePathSource.includes('realpathSync.native') || !pluginSource.includes('resolveWorkspacePath')) {
+if (!workspacePathSource.includes('path escapes the bound session workspace') || !workspacePathSource.includes('realpathSync.native') || !canvasHostSource.includes('resolveWorkspacePath') || !modelToolsSource.includes('resolveWorkspacePath')) {
   fail('canvas file IPC must enforce the bound workspace boundary')
 } else ok('all Pencil paths enforce a symlink-aware workspace boundary')
-if (!pluginSource.includes("res.writeHead(404); res.end('conversation is not available')") || pluginSource.includes('const workspace = liveCwd || requestedCwd')) {
+if (!canvasHostSource.includes("res.writeHead(404); res.end('conversation is not available')") || canvasHostSource.includes('const workspace = liveCwd || requestedCwd')) {
   fail('canvas bindings must require a live Harness conversation')
 } else ok('canvas bindings require a live Harness conversation')
-if (!pluginSource.includes('cancelled before delivery') || !pluginSource.includes('pending.delivered = true') || !pluginSource.includes('binding.queue.findIndex')) {
+if (!canvasTransportSource.includes('cancelled before delivery') || !canvasTransportSource.includes('pending.delivered = true') || !canvasTransportSource.includes('binding.queue.findIndex')) {
   fail('queued canvas requests must be removable on cancellation')
 } else ok('queued canvas requests are removed on cancellation')
-if (!pluginSource.includes('fs.chmodSync(stateFile, 0o600)') || !pluginSource.includes('mode: 0o600')) {
+if (!sessionStoreSource.includes('fs.chmodSync(stateFile, 0o600)') || !sessionStoreSource.includes('mode: 0o600')) {
   fail('persisted browser credentials must use owner-only permissions')
 } else ok('persisted browser credentials use owner-only permissions')
-if (!pluginSource.includes("attachments.saveImage") || !pluginSource.includes("blocks.push({ type: 'image', attachment: value.image })")) {
+if (!modelToolsSource.includes("attachments.saveImage") || !modelToolsSource.includes("blocks.push({ type: 'image', attachment: value.image })")) {
   fail('Pencil screenshots must return a real model-visible image block')
 } else ok('Pencil screenshots return a model-visible image block')
+
+console.log('[4d] module boundaries')
+if (!pluginSource.includes('createHeadlessRuntime') || !pluginSource.includes('registerModelTools') || !pluginSource.includes('registerCanvasHost')) {
+  fail('entrypoint must compose the headless, model-tool, and canvas modules')
+} else ok('entrypoint only composes the three runtime boundaries')
+if (pluginSource.includes("register('pencil_") || pluginSource.includes("path: '/pen-host/")) {
+  fail('entrypoint must not contain model tool definitions or Canvas Host routes')
+} else ok('entrypoint contains no tool definitions or Canvas Host routes')
+if (!canvasHostSource.includes('createCanvasTransport()') || !canvasHostSource.includes('createEditorAssets(') || !canvasHostSource.includes('createSessionStore()')) {
+  fail('Canvas Host must delegate transport, editor assets, and credential storage')
+} else ok('Canvas Host delegates transport, editor assets, and credential storage')
 
 // 5. profile template composition
 console.log('[5] profile template')
