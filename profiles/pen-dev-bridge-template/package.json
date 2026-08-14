@@ -1,6 +1,6 @@
 {
   "name": "pen-dev-bridge-profile",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "private": true,
   "description": "Example DSH Web profile: dsh-base + dsh-web-app + pen-dev-bridge-bundle. Copy to $DSH_HOME/profiles/<name> (or install via a Manager) to give DeepSeek the pen.dev design tools and canvas.",
   "dependencies": {

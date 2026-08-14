@@ -1,7 +1,7 @@
 {
   "name": "pen-dev-bridge",
-  "version": "0.1.1",
-  "description": "DeepSeek Harness bridge to pen.dev (pencil.dev): official Pencil MCP tools + local headless engine, with DeepSeek as the design agent, plus a browser-side canvas seat (50% split screen or floating editor window with autosave).",
+  "version": "0.2.0",
+  "description": "Session-bound DeepSeek Harness bridge to pen.dev: official Pencil MCP tools, per-conversation headless engines, and an on-demand browser canvas (split or floating, with autosave).",
   "type": "module",
   "main": "lib/index.js",
   "exports": {

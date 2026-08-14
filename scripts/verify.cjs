@@ -29,19 +29,24 @@ console.log('pen-dev-bridge static verification\n')
 
 // 1. package.json files
 console.log('[1] package.json files')
-for (const rel of [
+const packageFiles = [
   'packages/pen-dev-bridge/package.json',
   'bundles/pen-dev-bridge-bundle/package.json',
   'profiles/pen-dev-bridge-template/package.json',
-]) {
+]
+const packageVersions = []
+for (const rel of packageFiles) {
   try {
     const pkg = readJson(rel)
     ok(`${rel} (valid JSON, name=${pkg.name})`)
     if (!pkg.name) fail(`${rel}: missing name`)
+    packageVersions.push(pkg.version)
   } catch (err) {
     fail(`${rel}: ${err.message}`)
   }
 }
+if (new Set(packageVersions).size !== 1) fail('package, bundle, and profile versions must match')
+else ok(`package versions aligned at ${packageVersions[0]}`)
 
 // 2. bundle structure
 console.log('[2] bundle structure')
@@ -138,7 +143,28 @@ try {
   const client = fs.readFileSync(path.join(root, 'packages/pen-dev-bridge/lib/client.js'), 'utf8')
   if (!client.startsWith('window.__ModuleLoader__.load({')) fail('client bundle must start with the __ModuleLoader__.load wrap')
   else ok('client bundle wrapped for the web loader')
+  if (client.includes('store.setOpen(true)')) fail('client must not auto-open the canvas during plugin activation')
+  else ok('client does not auto-open the canvas')
+  if (!client.includes("fetch('/pen-host/bind'") || !client.includes('sessions.current')) {
+    fail('client must bind on demand and project the active Harness session')
+  } else ok('client binds on demand and follows the active session')
+  if (!client.includes("ctx.slots.inject('conversation.input.right'") || !client.includes('summary.blank !== true')) {
+    fail('blank conversations must expose an explicit input-bar canvas trigger')
+  } else ok('blank conversations expose an explicit canvas trigger')
 } catch (err) { fail('browser half: ' + err.message) }
+
+// 4c. The host must not derive a workspace from its launch directory. Both
+// model tools and the browser canvas resolve the owning session at use time.
+console.log('[4c] session workspace binding')
+if (pluginSource.includes('process.cwd()')) {
+  fail('host must not use process.cwd() as a workspace fallback')
+} else ok('host has no process.cwd() workspace fallback')
+if (!pluginSource.includes('function workspaceForExec(exec)') || !pluginSource.includes("path: '/pen-host/bind'")) {
+  fail('host must resolve tool workspaces per call and expose the canvas bind route')
+} else ok('host resolves workspaces per call and exposes the bind route')
+if (!pluginSource.includes('path escapes the bound session workspace')) {
+  fail('canvas file IPC must enforce the bound workspace boundary')
+} else ok('canvas file IPC enforces the bound workspace boundary')
 
 // 5. profile template composition
 console.log('[5] profile template')

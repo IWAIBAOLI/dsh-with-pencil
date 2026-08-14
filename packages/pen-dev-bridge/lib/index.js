@@ -145,6 +145,14 @@ export default {
         if (handle.stdout) handle.stdout.on('data', onData)
         handle.done.then(onExit, onExit)
       }).catch((err) => { stopEngine(engine); throw err })
+      handle.done.then(
+        () => {
+          if (engine.handle === handle) { engine.handle = null; engine.file = null }
+        },
+        () => {
+          if (engine.handle === handle) { engine.handle = null; engine.file = null }
+        },
+      )
       return engine.ready
     }
     function saveEngine(engine) {
@@ -235,7 +243,7 @@ export default {
         stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n')
       })
       const init = async () => {
-        await call('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'dsh-pen-dev-bridge', version: '0.1.0' } })
+        await call('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'dsh-pen-dev-bridge', version: '0.2.0' } })
         stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n')
       }
       const close = () => { try { handle.terminate() } catch (err) { /* ignore */ } }
@@ -533,7 +541,6 @@ export default {
     const webServer = ctx.get('webServer')
     if (webServer !== undefined) {
       const packageDir = path.dirname(fileURLToPath(import.meta.url))
-      const editorDir = path.resolve(process.env.DSH_PEN_EDITOR_DIR || path.join(packageDir, '../../../../pen-editor/out'))
       const stateFile = path.resolve(process.env.DSH_PEN_STATE_FILE || path.join(os.homedir(), '.dsh', 'pen-dev-bridge', 'state.json'))
       const sessionCli = path.join(os.homedir(), '.pencil', 'session-cli.json')
       const uiState = { email: '', token: '' }
@@ -548,6 +555,43 @@ export default {
       const TEXT_EXT = ['html', 'js', 'mjs', 'css', 'json', 'map', 'svg', 'txt', 'glsl']
       let hostMsgSeq = 0
       let rawIndex
+      let resolvedEditorDir
+
+      // Editor assets are plugin resources, never a conversation workspace.
+      // Resolve them lazily on the first canvas request: an explicit override,
+      // packaged assets, a source checkout, then the profile's local file/link
+      // dependency provenance used by plugin development installs.
+      function editorDirectory() {
+        if (resolvedEditorDir) return resolvedEditorDir
+        const candidates = []
+        if (process.env.DSH_PEN_EDITOR_DIR) candidates.push(path.resolve(process.env.DSH_PEN_EDITOR_DIR))
+        candidates.push(path.resolve(packageDir, '../editor/out'))
+        candidates.push(path.resolve(packageDir, '../../../../pen-editor/out'))
+        let cursor = packageDir
+        for (let depth = 0; depth < 5; depth += 1) {
+          const manifest = path.join(cursor, 'package.json')
+          try {
+            const pkg = JSON.parse(fs.readFileSync(manifest, 'utf8'))
+            const spec = pkg && pkg.dependencies && pkg.dependencies['pen-dev-bridge-bundle']
+            if (typeof spec === 'string' && (spec.startsWith('file:') || spec.startsWith('link:'))) {
+              const bundleDir = path.resolve(cursor, spec.slice(spec.indexOf(':') + 1))
+              candidates.push(path.resolve(bundleDir, '../../..', 'pen-editor/out'))
+            }
+          } catch (err) { /* not a profile manifest */ }
+          const parent = path.dirname(cursor)
+          if (parent === cursor) break
+          cursor = parent
+        }
+        for (const candidate of candidates) {
+          try {
+            if (fs.statSync(path.join(candidate, 'index.html')).isFile()) {
+              resolvedEditorDir = candidate
+              return candidate
+            }
+          } catch (err) { /* try the next independent resource location */ }
+        }
+        throw new Error('pen-editor assets unavailable; set DSH_PEN_EDITOR_DIR to pen-editor/out')
+      }
 
       try {
         const s = JSON.parse(fs.readFileSync(stateFile, 'utf8'))
@@ -592,9 +636,14 @@ export default {
       }
       function defaultFile(workspace) {
         const configured = process.env.DSH_PEN_FILE
-        return configured
+        const target = configured
           ? (path.isAbsolute(configured) ? configured : path.join(workspace, configured))
           : path.join(workspace, 'designs', 'design.pen')
+        const rel = path.relative(workspace, path.resolve(target))
+        if (rel === '..' || rel.startsWith('..' + path.sep) || path.isAbsolute(rel)) {
+          throw new Error('DSH_PEN_FILE must stay inside the bound conversation workspace')
+        }
+        return path.resolve(target)
       }
       function injectBootstrap(html, binding) {
         const bindingKey = JSON.stringify(binding.key)
@@ -651,10 +700,10 @@ setInterval(function () {
       function editorIndex() {
         if (rawIndex !== undefined) return rawIndex
         try {
-          rawIndex = fs.readFileSync(path.join(editorDir, 'index.html'), 'utf8')
+          rawIndex = fs.readFileSync(path.join(editorDirectory(), 'index.html'), 'utf8')
           return rawIndex
         } catch (err) {
-          throw new Error('pen-editor unavailable at ' + editorDir + '; set DSH_PEN_EDITOR_DIR')
+          throw new Error(err && err.message ? err.message : String(err))
         }
       }
 
@@ -682,7 +731,9 @@ setInterval(function () {
           res.end(servedIndex)
           return
         }
-        const full = path.join(editorDir, rel)
+        let full
+        try { full = path.join(editorDirectory(), rel) }
+        catch (err) { res.writeHead(503); res.end(err.message); return }
         let st
         try { st = await fsp.stat(full) } catch (err) { res.writeHead(404); res.end('not found'); return }
         if (!st.isFile()) { res.writeHead(404); res.end('not found'); return }
@@ -734,7 +785,10 @@ setInterval(function () {
           return
         }
         const key = randomUUID()
-        const binding = { key, sessionId, workspace, currentFile: defaultFile(workspace), queue: [] }
+        let currentFile
+        try { currentFile = defaultFile(workspace) }
+        catch (err) { res.writeHead(409); res.end(err.message); return }
+        const binding = { key, sessionId, workspace, currentFile, queue: [] }
         bindings.set(key, binding)
         res.writeHead(200, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ binding: key, workspace, file: binding.currentFile }))

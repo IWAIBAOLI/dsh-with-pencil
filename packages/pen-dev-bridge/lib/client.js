@@ -32,6 +32,9 @@ window.__ModuleLoader__.load({
 .dsh-penhost-header-btn:hover { background: var(--dsw-alias-bg-layer-1, #26272e); color: var(--dsw-alias-label-primary, #eee); border-color: var(--dsw-alias-border-l2, #3a3d4a); }
 .dsh-penhost-header-on { color: var(--dsw-alias-brand-primary, #4f7cff); border-color: var(--dsw-alias-brand-primary, #4f7cff); }
 .dsh-penhost-header-error { color: #ef7373; border-color: #ef7373; }
+.dsh-penhost-input-btn { width: 34px; height: 30px; padding: 0; border: none; border-radius: 8px; background: transparent; color: var(--dsw-alias-label-secondary, #9aa0b4); cursor: pointer; font-size: 15px; }
+.dsh-penhost-input-btn:hover { background: var(--dsw-alias-bg-layer-1, #26272e); color: var(--dsw-alias-label-primary, #eee); }
+.dsh-penhost-input-btn:disabled { cursor: wait; opacity: .55; }
 [data-penhost-wide] { grid-template-columns: var(--penhost-grid) !important; }
 [data-penhost-wide] > div:nth-child(3) { visibility: hidden; }
 `
@@ -63,6 +66,13 @@ window.__ModuleLoader__.load({
 				getSnapshot: () => snapshot,
 				subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener) },
 				patch,
+				remove(sessionId) {
+					if (!snapshot.sessions[sessionId]) return
+					const sessions = { ...snapshot.sessions }
+					delete sessions[sessionId]
+					snapshot = { sessions }
+					emit()
+				},
 				clear() { snapshot = { sessions: {} }; listeners.clear() },
 			}
 		}
@@ -139,7 +149,7 @@ window.__ModuleLoader__.load({
 						frame.style.removeProperty('--penhost-grid')
 					}
 				}
-			}, [active, state.open, state.mode, state.wide, sessionId, store, clampWide, applyGrid])
+			}, [active, state.open, state.mode, sessionId, store, clampWide, applyGrid])
 
 			React.useEffect(() => () => {
 				const resize = resizeRef.current
@@ -230,6 +240,14 @@ window.__ModuleLoader__.load({
 		function PenOverlay(props) {
 			const snapshot = useBridgeSnapshot(props.store)
 			const current = props.useSessions((sessions) => sessions.current)
+			const known = props.useSessions((sessions) => sessions.byId)
+			React.useEffect(() => {
+				for (const sessionId of Object.keys(snapshot.sessions)) {
+					if (!known[sessionId] || (known[sessionId].blank === true && sessionId !== current)) {
+						props.store.remove(sessionId)
+					}
+				}
+			}, [current, known, snapshot, props.store])
 			return React.createElement(React.Fragment, null,
 				Object.entries(snapshot.sessions).map(([sessionId, state]) => state.binding
 					? React.createElement(PenCanvas, { key: sessionId, store: props.store, sessionId, state, active: sessionId === current })
@@ -251,6 +269,20 @@ window.__ModuleLoader__.load({
 			}, state.loading ? '✏ 正在绑定…' : state.error ? '✏ 画布出错' : '✏ pen.dev 画布')
 		}
 
+		function PenBlankTrigger(props) {
+			const snapshot = useBridgeSnapshot(props.store)
+			const summary = props.useSessions((sessions) => sessions.byId[props.sessionId])
+			if (!summary || summary.blank !== true) return null
+			const state = snapshot.sessions[props.sessionId] || EMPTY_SESSION
+			return React.createElement('button', {
+				className: 'dsh-penhost-input-btn',
+				disabled: state.loading,
+				'aria-label': 'pen.dev 画布',
+				title: state.error || '在这个新会话的工作区打开 pen.dev 画布',
+				onClick: () => { void openForSession(props.store, props.sessionId, summary.cwd) },
+			}, state.loading ? '…' : '✏')
+		}
+
 		const name = 'pen-dev-bridge'
 		const inject = ['slots']
 
@@ -263,7 +295,11 @@ window.__ModuleLoader__.load({
 			const disposeHeader = ctx.slots.inject('conversation.session.header.actions', () => ctx.slots.register(
 				{ name: 'conversation.session.header.actions', id: 'penhost-header', order: 90, label: () => 'pen.dev 画布' },
 				(props) => React.createElement(PenHeader, { ...props, store })))
+			const disposeBlankTrigger = ctx.slots.inject('conversation.input.right', () => ctx.slots.register(
+				{ name: 'conversation.input.right', id: 'penhost-blank-trigger', order: 85, label: () => 'pen.dev 画布' },
+				(props) => React.createElement(PenBlankTrigger, { ...props, store })))
 			return () => {
+				if (typeof disposeBlankTrigger === 'function') disposeBlankTrigger()
 				if (typeof disposeHeader === 'function') disposeHeader()
 				if (typeof disposeOverlay === 'function') disposeOverlay()
 				store.clear()

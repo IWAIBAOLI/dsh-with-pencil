@@ -8,10 +8,10 @@
 
 这是会话内动态插件 `pencil-6` 与 `penin-1` 的**可安装持久化形态**：重启不丢，任何 profile 可装。
 
-插件带 **Browser 半（Client）**：浏览器右侧出现 pen.dev 画布分屏（默认 50% 宽、
-左缘可拖拽调宽，或切换浮动窗口），由 Host 半的 `/pen-editor` 静态路由 +
-`/pen-host` IPC 桥驱动，6 秒自动保存回本地 `.pen` 文件；画布打开时产品自带的
-「详情」列被 CSS 隐藏，不会与画布叠加。
+插件带 **Browser 半（Client）**：用户在会话内主动触发后，才把该会话及其工作区绑定到
+pen.dev 画布。画布可使用右侧 50% 分屏（左缘拖动调宽）或浮动窗口，由 Host 半的
+`/pen-editor` 静态路由与 `/pen-host` IPC 桥驱动，6 秒自动保存回该会话工作区的 `.pen`
+文件。切换会话时隐藏，返回时恢复；各会话分别保存打开状态、模式、宽度和浮动位置。
 
 ## 目录结构
 
@@ -76,17 +76,19 @@ dsh --profile pen-dev-bridge
 | `PEN_CLI_KEY` / `PENCIL_CLI_KEY` | pen.dev 组织级 CLI key（优先于会话登录） |
 | `DSH_PEN_EDITOR_DIR` | 浏览器画布编辑器 dist 目录；它与会话工作区无关（开发树会尝试使用同级 `pen-editor/out`） |
 | `DSH_PEN_FILE` | 每个会话画布的初始 `.pen` 文件（相对路径按对应会话工作区解析，默认 `designs/design.pen`） |
+| `DSH_PEN_STATE_FILE` | pen.dev 浏览器登录态文件（默认 `~/.dsh/pen-dev-bridge/state.json`，不写入项目工作区） |
 
 ## 画布（Browser 半）
 
 - 启动时不选择工作区、也不自动打开画布。点击会话头部按钮后才绑定该会话工作区；
   切换会话时隐藏，返回原会话时恢复。
+- 尚未发送消息的新会话没有会话头，此时从输入框右侧的 ✏ 按钮手动打开。
 - 首次打开默认采用 50% 右侧分屏，拖动左缘手柄可调宽（400px 起）。
 - 标题栏可切换 **浮动窗口**（按住标题拖动），✕ 关闭后可从会话头部
   「✏ pen.dev 画布」按钮重新打开。
 - 每 6 秒宿主向编辑器推 `save-document`，编辑器回 `save-resource` 内容落盘到
-  当前 `.pen` 文件；会话 token 读 `~/.pencil/session-cli.json`，登录态存
-  `<workspace>/.pen-host-state.json`。
+  当前 `.pen` 文件；会话 token 读 `~/.pencil/session-cli.json`，浏览器登录态存于
+  `~/.dsh/pen-dev-bridge/state.json`，不会污染项目工作区。
 - 分屏打开期间产品「详情」列被隐藏（`visibility: hidden`），不会叠在画布下面。
 
 ## 验证
