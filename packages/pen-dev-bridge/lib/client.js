@@ -28,6 +28,10 @@ window.__ModuleLoader__.load({
 .dsh-penhost-close:hover { background: rgba(255,255,255,.08); color: var(--dsw-alias-label-primary, #eee); }
 .dsh-penhost-body { flex: 1; min-height: 0; }
 .dsh-penhost-frame { width: 100%; height: 100%; border: none; background: #fff; }
+html[data-penhost-pointer] { user-select: none !important; }
+html[data-penhost-pointer] .dsh-penhost-frame { pointer-events: none !important; }
+html[data-penhost-pointer="resize"], html[data-penhost-pointer="resize"] * { cursor: col-resize !important; }
+html[data-penhost-pointer="drag"], html[data-penhost-pointer="drag"] * { cursor: grabbing !important; }
 .dsh-penhost-header-btn { padding: 4px 10px; border-radius: 6px; border: 1px solid var(--dsw-alias-border-l1, #34353d); background: transparent; color: var(--dsw-alias-label-secondary, #9aa0b4); cursor: pointer; font-size: 12px; }
 .dsh-penhost-header-btn:hover { background: var(--dsw-alias-bg-layer-1, #26272e); color: var(--dsw-alias-label-primary, #eee); border-color: var(--dsw-alias-border-l2, #3a3d4a); }
 .dsh-penhost-header-on { color: var(--dsw-alias-brand-primary, #4f7cff); border-color: var(--dsw-alias-brand-primary, #4f7cff); }
@@ -114,6 +118,35 @@ window.__ModuleLoader__.load({
 			} catch (error) { return null }
 		}
 
+		function trackPointer(event, mode, ref, onMove) {
+			const target = event.currentTarget
+			const pointerId = event.pointerId
+			let finished = false
+			document.documentElement.dataset.penhostPointer = mode
+			try { target.setPointerCapture(pointerId) } catch (error) { /* iframe shield remains as fallback */ }
+			const finish = () => {
+				if (finished) return
+				finished = true
+				window.removeEventListener('pointermove', onMove, true)
+				window.removeEventListener('pointerup', finish, true)
+				window.removeEventListener('pointercancel', finish, true)
+				window.removeEventListener('blur', finish)
+				target.removeEventListener('lostpointercapture', finish)
+				if (document.documentElement.dataset.penhostPointer === mode) delete document.documentElement.dataset.penhostPointer
+				try {
+					if (target.hasPointerCapture(pointerId)) target.releasePointerCapture(pointerId)
+				} catch (error) { /* capture may already be gone */ }
+				ref.current = null
+			}
+			ref.current = { finish }
+			window.addEventListener('pointermove', onMove, true)
+			window.addEventListener('pointerup', finish, true)
+			window.addEventListener('pointercancel', finish, true)
+			window.addEventListener('blur', finish)
+			target.addEventListener('lostpointercapture', finish)
+			return finish
+		}
+
 		function PenCanvas(props) {
 			const { store, sessionId, state, active } = props
 			const dragRef = React.useRef(null)
@@ -161,49 +194,30 @@ window.__ModuleLoader__.load({
 			const startResize = (event) => {
 				if (state.mode !== 'split' || (event.button !== 0 && event.pointerType === 'mouse')) return
 				event.preventDefault(); event.stopPropagation()
+				if (resizeRef.current) resizeRef.current.finish()
 				const frame = frameOf()
 				const startX = event.clientX
 				const startWide = effectiveWide
-				const finish = () => {
-					window.removeEventListener('pointermove', onMove)
-					window.removeEventListener('pointerup', finish)
-					window.removeEventListener('pointercancel', finish)
-					window.removeEventListener('blur', finish)
-					resizeRef.current = null
-				}
 				const onMove = (moveEvent) => {
 					const width = clampWide(startWide + startX - moveEvent.clientX)
 					store.patch(sessionId, { wide: width })
 					if (frame) applyGrid(frame, width)
 				}
-				resizeRef.current = { finish }
-				window.addEventListener('pointermove', onMove)
-				window.addEventListener('pointerup', finish)
-				window.addEventListener('pointercancel', finish)
-				window.addEventListener('blur', finish)
+				trackPointer(event, 'resize', resizeRef, onMove)
 			}
 
 			const startDrag = (event) => {
 				if (state.mode !== 'float' || (event.button !== 0 && event.pointerType === 'mouse')) return
+				event.preventDefault()
+				if (dragRef.current) dragRef.current.finish()
 				const initial = state.pos || { x: Math.max(12, window.innerWidth - 920), y: Math.max(12, window.innerHeight - 720) }
 				const dx = event.clientX - initial.x
 				const dy = event.clientY - initial.y
-				const finish = () => {
-					window.removeEventListener('pointermove', onMove)
-					window.removeEventListener('pointerup', finish)
-					window.removeEventListener('pointercancel', finish)
-					window.removeEventListener('blur', finish)
-					dragRef.current = null
-				}
 				const onMove = (moveEvent) => store.patch(sessionId, { pos: {
 					x: Math.min(Math.max(8, moveEvent.clientX - dx), Math.max(8, window.innerWidth - 120)),
 					y: Math.min(Math.max(8, moveEvent.clientY - dy), Math.max(8, window.innerHeight - 48)),
 				} })
-				dragRef.current = { finish }
-				window.addEventListener('pointermove', onMove)
-				window.addEventListener('pointerup', finish)
-				window.addEventListener('pointercancel', finish)
-				window.addEventListener('blur', finish)
+				trackPointer(event, 'drag', dragRef, onMove)
 			}
 
 			const isSplit = state.mode === 'split'

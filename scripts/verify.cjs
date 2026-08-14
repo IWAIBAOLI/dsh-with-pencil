@@ -151,6 +151,9 @@ try {
   if (!client.includes("ctx.slots.inject('conversation.input.right'") || !client.includes('summary.blank !== true')) {
     fail('blank conversations must expose an explicit input-bar canvas trigger')
   } else ok('blank conversations expose an explicit canvas trigger')
+  if (!client.includes('setPointerCapture(pointerId)') || !client.includes('html[data-penhost-pointer] .dsh-penhost-frame { pointer-events: none')) {
+    fail('canvas resize/drag must keep pointer ownership across the editor iframe')
+  } else ok('canvas resize/drag keeps pointer ownership across the editor iframe')
 } catch (err) { fail('browser half: ' + err.message) }
 
 // 4c. The host must not derive a workspace from its launch directory. Both
