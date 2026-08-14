@@ -97,10 +97,53 @@ export default {
       const key = String(exec && exec.agent && exec.agent.session && exec.agent.session.id || workspace)
       let engine = engines.get(key)
       if (!engine) {
-        engine = { key, workspace, handle: null, file: null, ready: Promise.resolve() }
+        engine = { key, workspace, handle: null, file: null, ready: Promise.resolve(), output: '', outputWaiters: [], dirty: false }
         engines.set(key, engine)
       }
       return engine
+    }
+    function appendEngineOutput(engine, chunk) {
+      engine.output += chunk.toString()
+      for (const waiter of engine.outputWaiters.slice()) {
+        const fresh = engine.output.slice(waiter.start)
+        if (!waiter.test(fresh)) continue
+        clearTimeout(waiter.timer)
+        engine.outputWaiters.splice(engine.outputWaiters.indexOf(waiter), 1)
+        waiter.resolve(fresh)
+      }
+    }
+    function waitForEngineOutput(engine, test, timeoutMs, start) {
+      return new Promise((resolve, reject) => {
+        const waiter = { start: start === undefined ? engine.output.length : start, test, resolve, reject, timer: null }
+        waiter.timer = setTimeout(() => {
+          const index = engine.outputWaiters.indexOf(waiter)
+          if (index !== -1) engine.outputWaiters.splice(index, 1)
+          reject(new Error('pen.dev engine command timed out after ' + timeoutMs + 'ms'))
+        }, timeoutMs)
+        engine.outputWaiters.push(waiter)
+        const fresh = engine.output.slice(waiter.start)
+        if (test(fresh)) {
+          clearTimeout(waiter.timer)
+          engine.outputWaiters.splice(engine.outputWaiters.indexOf(waiter), 1)
+          resolve(fresh)
+        }
+      })
+    }
+    function rejectEngineWaiters(engine, error) {
+      for (const waiter of engine.outputWaiters.splice(0)) {
+        clearTimeout(waiter.timer)
+        waiter.reject(error)
+      }
+    }
+    async function engineCommand(engine, command, test, timeoutMs) {
+      if (!engine.handle || !engine.handle.stdin) throw new Error('pen.dev engine is not running')
+      const awaited = waitForEngineOutput(engine, test, timeoutMs)
+      try { engine.handle.stdin.write(command + '\n') }
+      catch (err) {
+        rejectEngineWaiters(engine, err)
+        throw err
+      }
+      return awaited
     }
     function cliSocketActive() {
       if (!fs.existsSync(cliSocket)) return Promise.resolve(false)
@@ -123,11 +166,16 @@ export default {
       try { await fsp.unlink(cliSocket); return true }
       catch (err) { return false }
     }
-    async function stopEngine(engine) {
+    async function stopEngine(engine, flush = true) {
       const handle = engine && engine.handle
       if (!handle) return
+      if (flush && engine.dirty) {
+        await saveEngine(engine)
+        engine.dirty = false
+      }
       engine.handle = null
       engine.file = null
+      engine.dirty = false
       if (activeEngine === engine) activeEngine = null
       try { handle.terminate() } catch (err) { /* ignore */ }
       try {
@@ -149,6 +197,9 @@ export default {
         throw new Error('another pen.dev CLI engine is already using ' + cliSocket)
       }
       engine.file = target
+      engine.output = ''
+      engine.outputWaiters = []
+      engine.dirty = false
       // `--out` starts from an EMPTY canvas and never loads existing content;
       // on an existing file use `--in target --out target` so prior saves load.
       const argv = fs.existsSync(target)
@@ -165,33 +216,18 @@ export default {
       })
       engine.handle = handle
       activeEngine = engine
-      engine.ready = new Promise((resolve, reject) => {
-        let out = ''
-        let settled = false
-        const deadline = AbortSignal.timeout(20000)
-        const onAbort = () => { cleanup(); reject(new Error('pen.dev engine did not become ready in time')) }
-        const onData = (chunk) => {
-          out += chunk.toString()
-          if (out.includes('Ready.')) { cleanup(); resolve() }
-        }
-        const onExit = () => { cleanup(); reject(new Error('pen.dev engine exited before becoming ready')) }
-        const cleanup = () => {
-          if (settled) return
-          settled = true
-          deadline.removeEventListener('abort', onAbort)
-          if (handle.stdout) { try { handle.stdout.removeListener('data', onData) } catch (err) { /* ignore */ } }
-        }
-        deadline.addEventListener('abort', onAbort)
-        if (handle.stdout) handle.stdout.on('data', onData)
-        handle.done.then(onExit, onExit)
-      }).catch(async (err) => { await stopEngine(engine); throw err })
+      if (handle.stdout) handle.stdout.on('data', (chunk) => appendEngineOutput(engine, chunk))
+      engine.ready = waitForEngineOutput(engine, (fresh) => fresh.includes('[INFO] Ready.'), 20000, 0)
+        .catch(async (err) => { await stopEngine(engine, false); throw err })
       handle.done.then(
         () => {
+          rejectEngineWaiters(engine, new Error('pen.dev engine exited'))
           if (engine.handle === handle) { engine.handle = null; engine.file = null }
           if (activeEngine === engine) activeEngine = null
           void cleanupStaleCliSocket()
         },
         () => {
+          rejectEngineWaiters(engine, new Error('pen.dev engine exited'))
           if (engine.handle === handle) { engine.handle = null; engine.file = null }
           if (activeEngine === engine) activeEngine = null
           void cleanupStaleCliSocket()
@@ -199,10 +235,14 @@ export default {
       )
       return engine.ready
     }
-    function saveEngine(engine) {
-      if (engine.handle && engine.handle.stdin) {
-        try { engine.handle.stdin.write('save()\n') } catch (err) { /* ignore */ }
-      }
+    async function saveEngine(engine) {
+      const target = engine && engine.file
+      if (!target) throw new Error('pen.dev engine has no active file')
+      await engineCommand(engine, 'save()', (fresh) => fresh.includes('Saved ' + target), 15000)
+      const content = await fsp.readFile(target, 'utf8')
+      const document = JSON.parse(content)
+      if (!document || !Array.isArray(document.children)) throw new Error('saved .pen file is not a valid document')
+      return { bytes: Buffer.byteLength(content), children: document.children.length }
     }
     ctx.effect(() => () => {
       for (const engine of engines.values()) void stopEngine(engine)
@@ -290,13 +330,21 @@ export default {
         stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n')
       })
       const init = async () => {
-        await call('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'dsh-pen-dev-bridge', version: '0.3.3' } })
+        await call('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'dsh-pen-dev-bridge', version: '0.3.4' } })
         stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n')
         const listed = await call('tools/list', {})
         const tools = listed && listed.result && Array.isArray(listed.result.tools) ? listed.result.tools : []
         return new Map(tools.map((tool) => [tool.name, tool]))
       }
-      const close = () => { try { handle.terminate() } catch (err) { /* ignore */ } }
+      const close = async () => {
+        try { handle.terminate() } catch (err) { /* ignore */ }
+        try {
+          await Promise.race([
+            handle.done.catch(() => undefined),
+            new Promise((resolve) => setTimeout(resolve, 2000)),
+          ])
+        } catch (err) { /* ignore */ }
+      }
       return { call, init, close, done: handle.done }
     }
 
@@ -350,11 +398,8 @@ export default {
         if (res && res.error) {
           return { ok: false, text: 'MCP error: ' + String((res.error.message || JSON.stringify(res.error))).slice(0, 4000) }
         }
-        if (tool === 'execute' || actualTool === 'batch_design' || tool === 'export_html' || tool === 'export_nodes') {
-          setTimeout(() => saveEngine(engine), 400)
-        }
         const content = res && res.result && res.result.content
-        const text = Array.isArray(content)
+        let text = Array.isArray(content)
           ? content.map((c) => {
               if (c && c.text != null) return c.text
               if (c && c.type === 'image' && c.data) {
@@ -363,11 +408,24 @@ export default {
               return ''
             }).join('\n')
           : JSON.stringify(res && res.result)
+        if (!(res && res.result && res.result.isError) && (tool === 'execute' || actualTool === 'batch_design')) {
+          engine.dirty = true
+          try {
+            const persisted = await saveEngine(engine)
+            engine.dirty = false
+            text += '\nSaved to disk: ' + engine.file + ' (' + persisted.bytes + ' bytes, ' + persisted.children + ' top-level nodes).'
+          } catch (err) {
+            return { ok: false, text: text.slice(0, 6000) + '\n\nMCP edit succeeded in memory, but disk save failed: ' + (err && err.message ? err.message : String(err)) }
+          }
+        }
         return { ok: !(res && res.result && res.result.isError), text: text.slice(0, 8000) }
       } catch (err) {
         return { ok: false, text: 'MCP call failed: ' + (err && err.message ? err.message : String(err)) }
       } finally {
-        client.close()
+        // The official MCP helper and the headless editor share a global
+        // Pencil socket. Do not let a retiring helper overlap the next tool
+        // call or reconnect to a newly switched engine.
+        await client.close()
       }
     }
     function runMcp(tool, args, opts) {

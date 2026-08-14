@@ -195,9 +195,12 @@ if (!pluginSource.includes('binding.loadedFile !== binding.currentFile') || !plu
 if (!pluginSource.includes("get_app_state: ['get_app_state', 'get_editor_state']") || !pluginSource.includes("execute: ['execute', 'batch_design']") || !pluginSource.includes("await call('tools/list', {})")) {
   fail('MCP calls must map the schema-compatible CLI legacy tool names from tools/list')
 } else ok('MCP calls map legacy tool names discovered through tools/list')
-if (!pluginSource.includes('function cliSocketActive()') || !pluginSource.includes('async function cleanupStaleCliSocket()') || !pluginSource.includes('let mcpSerial = Promise.resolve()')) {
-  fail('headless MCP calls must serialize and clean only inactive CLI sockets')
-} else ok('headless MCP calls serialize and clean inactive CLI sockets')
+if (!pluginSource.includes('function cliSocketActive()') || !pluginSource.includes('async function cleanupStaleCliSocket()') || !pluginSource.includes('let mcpSerial = Promise.resolve()') || !pluginSource.includes('await client.close()')) {
+  fail('headless MCP calls must serialize, retire helpers, and clean only inactive CLI sockets')
+} else ok('headless MCP calls serialize, retire helpers, and clean inactive CLI sockets')
+if (!pluginSource.includes('async function engineCommand(') || !pluginSource.includes("fresh.includes('Saved ' + target)") || !pluginSource.includes('MCP edit succeeded in memory, but disk save failed') || !pluginSource.includes('Saved to disk: ')) {
+  fail('MCP edits must await an acknowledged save and verify the disk document')
+} else ok('MCP edits await an acknowledged save and verify the disk document')
 if (!pluginSource.includes('process.kill(pid, 0)') || !pluginSource.includes('No pen.dev engine is bound to this conversation')) {
   fail('external editor detection must ignore stale app records and request an explicit open')
 } else ok('stale external editor records are ignored with an explicit open hint')

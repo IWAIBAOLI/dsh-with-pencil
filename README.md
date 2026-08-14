@@ -67,8 +67,9 @@ Bridge 会读取 MCP `tools/list`，把现行 `get_app_state` / `execute` 自动
 
 ## 引擎坐席
 
-- 默认：插件自持 **headless 引擎**（`pen interactive --out <file>`，stdin 保持打开，
-  每次 `execute` 后自动 `save()` 落盘）。
+- 默认：插件自持 **headless 引擎**（`pen interactive --out <file>`，stdin 保持打开）。
+  每次 `execute` / `batch_design` 成功后会立即发送 `save()`，只有收到精确的 `Saved <path>`
+  回执并重新读取到合法磁盘 JSON 后，工具才返回成功；失败时保留 dirty 状态并阻止静默切换文件。
 - 官方 CLI 固定使用全局 `pencil-cli.sock`，因此 Bridge 会串行执行 MCP 调用，并在会话文件间
   安全切换唯一的活动引擎；启动前只会删除确认无人监听的残留 socket。
 - 备选：检测到运行中的 **Pencil Desktop / IDE（Antigravity 等）** 时自动连 `--app <name>`
