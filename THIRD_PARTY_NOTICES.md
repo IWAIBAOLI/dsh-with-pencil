@@ -1,6 +1,6 @@
 # Third-party notices
 
-`pen-dev-bridge` is an independent, unofficial integration. It is not endorsed
+`dsh-with-pencil` is an independent, unofficial integration. It is not endorsed
 by, affiliated with, or maintained by pen.dev or DeepSeek.
 
 ## pen.dev / Pencil

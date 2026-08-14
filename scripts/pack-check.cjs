@@ -7,7 +7,7 @@ const path = require('node:path')
 const { execFileSync } = require('node:child_process')
 
 const root = path.resolve(__dirname, '..')
-const cache = path.join(os.tmpdir(), 'pen-dev-bridge-npm-pack-cache')
+const cache = path.join(os.tmpdir(), 'dsh-with-pencil-npm-pack-cache')
 
 function dryRun(relative, required, allowed) {
   const cwd = path.join(root, relative)

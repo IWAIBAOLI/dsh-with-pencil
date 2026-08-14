@@ -1,7 +1,7 @@
-# pen-dev-bridge
+# dsh-with-pencil
 
-把官方 pen.dev（Pencil）的编辑能力接入 DeepSeek Harness。DeepSeek 仍然是设计 Agent；
-Bridge 只负责把模型工具、当前会话和用户看到的 Pencil 画布连接起来。
+让 DeepSeek Harness 使用官方 pen.dev（Pencil）的编辑能力。DeepSeek 仍然是设计 Agent；
+本插件只负责让模型工具、当前会话和用户看到的 Pencil 画布协同工作。
 
 默认注册 7 个核心工具：`pencil_mcp_open`、`get_app_state`、`execute`、
 `get_guidelines`、`get_screenshot`、`export_html` 和 `export_nodes`。旧的一次性 CLI 助手
@@ -14,7 +14,7 @@ Bridge 只负责把模型工具、当前会话和用户看到的 Pencil 画布�
 
 - `@pen.dev/cli@0.3.0` 是官方包，提供 headless 引擎和 MCP server。
 - editor `0.1.94` 是官方浏览器编辑器 bundle，负责画布渲染和交互。
-- 本仓库的 Bridge 是自定义对接层，负责 Harness 工具注册、会话/工作区绑定、Browser UI、
+- 本仓库是自定义对接层，负责 Harness 工具注册、会话/工作区绑定、Browser UI、
   editor IPC、保存确认和截图附件。
 - 当前实现不依赖 Antigravity/Pencil Desktop 扩展外壳；只有显式设置
   `DSH_PEN_MCP_APP` 时才连接外部 Pencil app。
@@ -30,7 +30,7 @@ Bridge 只负责把模型工具、当前会话和用户看到的 Pencil 画布�
 - 切换到其他会话时画布隐藏；返回原会话后恢复。会话被移除时会先保存再解绑。
 - 画布打开时，MCP 编辑直接进入该会话的可见 editor IPC，修改实时渲染，并在工具返回成功前
   等待 `save-resource` 落盘、重新解析磁盘 JSON。
-- 画布未打开时，Bridge 才启动官方 headless 引擎。现有文件使用
+- 画布未打开时，插件才启动官方 headless 引擎。现有文件使用
   `interactive --in <file> --out <file>`，每次编辑后发送 `save()`，只有收到保存回执并验证
   磁盘文档后才返回成功。
 - 官方 CLI 共用全局 `pencil-cli.sock`；所有 headless 操作与引擎交接串行执行。不同会话的
@@ -59,7 +59,7 @@ lib/workspace-path.js     session 工作区与路径边界
 lib/legacy-tools.js       可选的一次性 CLI 工具
 lib/client.js             Harness Browser 分屏/浮动画布
 cordis.patch.yml          DSH Bundle 层与 Host 服务注入
-profiles/pen-dev-bridge-template/
+profiles/dsh-with-pencil-template/
   package.json              开发用示例 profile
 tests/
   live-canvas.test.mjs      真实协议形状的 Agent/Canvas 模拟
@@ -82,23 +82,24 @@ scripts/verify.cjs          包结构和关键约束检查
 3. 把仓库根目录作为本地 Bundle 安装到目标 DSH profile：
 
    ```bash
-   dsh plugin --profile web add file:/absolute/path/to/pen-dev-bridge
+   dsh plugin --profile web add file:/absolute/path/to/dsh-with-pencil
    ```
 
 4. 重启 DSH。该 Bundle 会安装固定版本的官方 `@pen.dev/cli`，并同时加载 Host 和 Browser Client。
 
 这里有意使用 `file:` 而不是 `link:`：前者会在 profile 内生成完整依赖树；后者要求源码目录自己
 已经安装全部 runtime/peer dependencies。若从旧的双包开发版迁移，先运行
-`dsh plugin --profile web remove pen-dev-bridge-bundle`，再执行上面的单包安装命令。
+`dsh plugin --profile web remove pen-dev-bridge-bundle`，再执行上面的单包安装命令。旧的
+`pen-dev-bridge` 开发安装也应先移除，避免同一组画布路由被注册两次。
 
 也可以直接在仓库内安装示例 profile 的依赖进行开发验证，但不要把下面命令理解为发行安装器：
 
 ```bash
-cd profiles/pen-dev-bridge-template
+cd profiles/dsh-with-pencil-template
 pnpm install
 ```
 
-后续正式安装器应完成三件事：安装 Bridge Bundle（依赖会安装固定版本官方 CLI）、从官方地址下载并
+后续正式安装器应完成三件事：安装插件 Bundle（依赖会安装固定版本官方 CLI）、从官方地址下载并
 校验 editor bundle、修改目标 profile 配置。editor bundle 是否可随插件再分发，需要先确认
 pen.dev 的授权，因此目前不会把官方 dist 直接提交进本仓库。
 
@@ -112,7 +113,7 @@ pen.dev 的授权，因此目前不会把官方 dist 直接提交进本仓库。
 | `DSH_PEN_MCP_APP` | 显式连接外部 Pencil app；默认不自动探测 |
 | `DSH_PEN_LEGACY_TOOLS` | 设为 `1` 时注册 5 个旧 CLI 助手 |
 | `PEN_CLI_KEY` / `PENCIL_CLI_KEY` | pen.dev 组织 CLI key |
-| `DSH_PEN_STATE_FILE` | Browser 登录态文件，默认 `~/.dsh/pen-dev-bridge/state.json` |
+| `DSH_PEN_STATE_FILE` | Browser 登录态文件，默认 `~/.dsh/dsh-with-pencil/state.json`；首次读取时兼容旧路径 |
 
 ## 画布行为
 

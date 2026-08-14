@@ -1,4 +1,4 @@
-# Releasing pen-dev-bridge
+# Releasing dsh-with-pencil
 
 ## Distribution shape
 
@@ -6,7 +6,7 @@ The repository root is the only publishable package. It is both the DSH Bundle
 and the Host/Client implementation:
 
 ```text
-pen-dev-bridge
+dsh-with-pencil
 ├── package.json          dsh.bundle + dsh.client + runtime dependencies
 ├── cordis.patch.yml      mounts the Host plugin
 ├── lib/                  prebuilt Host and browser modules
@@ -76,7 +76,7 @@ remain unresolved.
 7. Install the published artifact in another clean profile:
 
    ```sh
-   dsh plugin --profile pencil-beta add pen-dev-bridge@beta
+   dsh plugin --profile pencil-beta add dsh-with-pencil@beta
    dsh --profile pencil-beta --dump-config
    dsh --profile pencil-beta
    ```

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Static verification for the pen-dev-bridge bundle (no DSH runtime needed).
+ * Static verification for the dsh-with-pencil bundle (no DSH runtime needed).
  *
  * Checks:
  *  - every package.json is valid JSON with the right dsh shape
@@ -24,13 +24,13 @@ function readJson(p) {
   return JSON.parse(fs.readFileSync(path.join(root, p), 'utf8'))
 }
 
-console.log('pen-dev-bridge static verification\n')
+console.log('dsh-with-pencil static verification\n')
 
 // 1. package.json files
 console.log('[1] package.json files')
 const packageFiles = [
   'package.json',
-  'profiles/pen-dev-bridge-template/package.json',
+  'profiles/dsh-with-pencil-template/package.json',
 ]
 const packageVersions = []
 for (const rel of packageFiles) {
@@ -46,11 +46,11 @@ for (const rel of packageFiles) {
 if (new Set(packageVersions).size !== 1) fail('package and profile versions must match')
 else ok(`package versions aligned at ${packageVersions[0]}`)
 try {
-  const bridge = readJson('package.json')
-  if (bridge.dependencies?.['@pen.dev/cli'] !== '0.3.0') {
+  const integration = readJson('package.json')
+  if (integration.dependencies?.['@pen.dev/cli'] !== '0.3.0') {
     fail('@pen.dev/cli must stay pinned to schema-2.14-compatible version 0.3.0')
   } else ok('@pen.dev/cli is pinned to schema-2.14-compatible version 0.3.0')
-} catch (err) { fail('bridge dependency versions: ' + err.message) }
+} catch (err) { fail('integration dependency versions: ' + err.message) }
 
 // 2. bundle structure
 console.log('[2] bundle structure')
@@ -59,7 +59,7 @@ try {
   if (!bundle.dsh || !bundle.dsh.bundle || bundle.dsh.bundle.patch !== './cordis.patch.yml') {
     fail('bundle package.json must declare dsh.bundle.patch -> ./cordis.patch.yml')
   } else ok('bundle declares dsh.bundle.patch')
-  if (bundle.name !== 'pen-dev-bridge') fail('bundle package name must be pen-dev-bridge')
+  if (bundle.name !== 'dsh-with-pencil') fail('bundle package name must be dsh-with-pencil')
   else ok('bundle and Host share one installable package')
   if (!bundle.files?.includes('lib') || !bundle.files?.includes('cordis.patch.yml') || !bundle.files?.includes('THIRD_PARTY_NOTICES.md')) {
     fail('bundle files allowlist must include runtime code, patch, and third-party notices')
@@ -96,17 +96,17 @@ const insertedRows = (rel) => {
 try {
   parseYaml('cordis.patch.yml')
   const rows = insertedRows('cordis.patch.yml')
-  if (!rows.some((row) => row.id === 'pen-dev-bridge' && row.name === 'pen-dev-bridge')) {
-    fail('bundle patch must insert { id: pen-dev-bridge, name: pen-dev-bridge }')
-  } else ok('bundle patch inserts pen-dev-bridge row')
+  if (!rows.some((row) => row.id === 'dsh-with-pencil' && row.name === 'dsh-with-pencil')) {
+    fail('bundle patch must insert { id: dsh-with-pencil, name: dsh-with-pencil }')
+  } else ok('bundle patch inserts dsh-with-pencil row')
   const patch = patchText('cordis.patch.yml')
   if (!patch.includes("inject: ['tools', 'subprocess', 'sandboxPolicy', 'webServer', 'sessions', 'attachments', 'systemPrompt']") && !patch.includes('inject: ["tools", "subprocess", "sandboxPolicy", "webServer", "sessions", "attachments", "systemPrompt"]')) {
     fail('bundle patch row must inject tool, process, web, session, attachment, and system-prompt services')
   } else ok('bundle patch row injects tool, process, web, session, attachment, and system-prompt services')
 } catch (err) { fail('bundle patch: ' + err.message) }
 try {
-  parseYaml('profiles/pen-dev-bridge-template/cordis.yml')
-  parseYaml('profiles/pen-dev-bridge-template/cordis.patch.yml')
+  parseYaml('profiles/dsh-with-pencil-template/cordis.yml')
+  parseYaml('profiles/dsh-with-pencil-template/cordis.patch.yml')
   ok('profile root + user patch parse')
 } catch (err) { fail('profile patches: ' + err.message) }
 
@@ -194,7 +194,7 @@ console.log('[4b] browser-half declaration')
 try {
   const pkg = readJson('package.json')
   const decl = pkg.dsh && pkg.dsh.client
-  if (!decl || decl.platform !== 'web') fail('pen-dev-bridge must declare dsh.client.platform: web')
+  if (!decl || decl.platform !== 'web') fail('dsh-with-pencil must declare dsh.client.platform: web')
   else ok('dsh.client.platform = web')
   if (!pkg.exports || pkg.exports['./client'] !== './lib/client.js') fail('package must export "./client" -> ./lib/client.js')
   else ok('exports["./client"] -> lib/client.js')
@@ -313,12 +313,12 @@ if (!canvasHostSource.includes('createCanvasTransport()') || !canvasHostSource.i
 // 5. profile template composition
 console.log('[5] profile template')
 try {
-  const profile = readJson('profiles/pen-dev-bridge-template/package.json')
+  const profile = readJson('profiles/dsh-with-pencil-template/package.json')
   const bundles = profile.dsh && profile.dsh.profile && profile.dsh.profile.bundles
   if (!Array.isArray(bundles) || !bundles.includes('@deepseek-ai/dsh-base')) fail('profile must list @deepseek-ai/dsh-base')
   if (!Array.isArray(bundles) || !bundles.includes('@deepseek-ai/dsh-web-app')) fail('profile must list @deepseek-ai/dsh-web-app')
-  if (!Array.isArray(bundles) || !bundles.includes('pen-dev-bridge')) fail('profile must list pen-dev-bridge')
-  if (profile.dependencies?.['pen-dev-bridge'] !== 'file:../..') fail('profile fixture must install the repository root package')
+  if (!Array.isArray(bundles) || !bundles.includes('dsh-with-pencil')) fail('profile must list dsh-with-pencil')
+  if (profile.dependencies?.['dsh-with-pencil'] !== 'file:../..') fail('profile fixture must install the repository root package')
   ok(`bundles = [${bundles.join(', ')}]`)
 } catch (err) { fail('profile: ' + err.message) }
 

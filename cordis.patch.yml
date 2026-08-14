@@ -1,7 +1,7 @@
-# pen-dev-bridge bundle patch layer.
+# dsh-with-pencil bundle patch layer.
 #
 # Applied as one insert over the profile root after the base bundle layers.
-# Adds the pen-dev-bridge HOST plugin row: a real Node Cordis plugin that
+# Adds the dsh-with-pencil HOST plugin row: a real Node Cordis plugin that
 # spawns pen.dev's local headless editor engine (from @pen.dev/cli) and
 # registers 7 core pencil_mcp_* model tools (with 5 one-shot CLI helpers
 # available only through DSH_PEN_LEGACY_TOOLS=1), plus the browser-side canvas seat (the package's
@@ -12,6 +12,6 @@
 # keeps both the model tools and browser canvas available on first boot.
 
 - insert:
-    - id: pen-dev-bridge
-      name: 'pen-dev-bridge'
+    - id: dsh-with-pencil
+      name: 'dsh-with-pencil'
       inject: ['tools', 'subprocess', 'sandboxPolicy', 'webServer', 'sessions', 'attachments', 'systemPrompt']

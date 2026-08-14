@@ -1,8 +1,8 @@
 {
-  "name": "pen-dev-bridge",
+  "name": "dsh-with-pencil",
   "private": true,
   "version": "0.5.0-beta.1",
-  "description": "Session-bound DeepSeek Harness bridge to pen.dev with official Pencil MCP tools and an on-demand browser canvas.",
+  "description": "Session-aware Pencil integration for DeepSeek Harness with official MCP tools and an on-demand browser canvas.",
   "license": "MIT",
   "type": "module",
   "main": "./lib/index.js",

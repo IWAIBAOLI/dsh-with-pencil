@@ -19,4 +19,4 @@ for (const relative of checks) {
   execFileSync(process.execPath, [path.join(root, relative)], { cwd: root, stdio: 'inherit' })
 }
 
-console.log('\nAll pen-dev-bridge checks passed.')
+console.log('\nAll dsh-with-pencil checks passed.')

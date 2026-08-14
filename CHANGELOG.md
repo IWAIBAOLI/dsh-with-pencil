@@ -6,6 +6,9 @@ All notable changes to this project are documented here. Versions follow
 
 ## 0.5.0-beta.1 - 2026-08-15
 
+- Adopt the public package name `dsh-with-pencil` to describe DSH using the
+  official Pencil capabilities without presenting the integration as a
+  standalone product.
 - Bind the live Pencil canvas to its owning Harness conversation and hide it in
   other conversations without discarding the editor session.
 - Route Agent edits through the visible editor when open, with acknowledged,
@@ -18,5 +21,5 @@ All notable changes to this project are documented here. Versions follow
   preflight editor assets before opening.
 - Split Host responsibilities into runtime, transport, assets, session,
   workspace and model-tool modules.
-- Consolidate the former Bridge and wrapper Bundle into one installable DSH
+- Consolidate the former Host integration and wrapper Bundle into one installable DSH
   package, eliminating local `file:` dependencies from published artifacts.
