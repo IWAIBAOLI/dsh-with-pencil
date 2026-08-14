@@ -58,7 +58,17 @@ export default {
 
     const headless = createHeadlessRuntime({ ctx, sub, penBin, mcpBin, baseEnv, workspaceForExec })
     const toolCount = registerModelTools({ ctx, attachments, headless, workspaceForExec })
-    registerCanvasHost({ ctx, sub, mcpBin, headless })
+    const canvasHost = registerCanvasHost({ ctx, sub, mcpBin, headless })
+    if (canvasHost && typeof ctx.on === 'function') {
+      ctx.on('system-prompt/assemble', async (assembly, context, next) => {
+        const selection = await canvasHost.selectionContext(context && context.agent, context && context.signal)
+        if (selection) {
+          if (!Array.isArray(assembly.contexts)) assembly.contexts = []
+          assembly.contexts.push({ name: 'pen-dev:selection', text: selection })
+        }
+        return next()
+      })
+    }
 
     console.log(`[pen-dev-bridge] registered ${toolCount} pencil_* tools (pen=${penBin}, mcp=${mcpBin}; workspace resolves per call)`)
   },

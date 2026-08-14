@@ -39,6 +39,10 @@ Bridge 只负责把模型工具、当前会话和用户看到的 Pencil 画布�
 模型输入、浏览器 IPC、导入和导出路径都被限制在所属会话工作区内，并检查符号链接逃逸。
 浏览器登录态使用原子替换写入且权限为 `0600`。
 
+画布选区会在下一轮 Agent 启动时作为动态上下文注入，包含当前 `.pen` 文件和节点 ID；没有选区时
+不增加上下文。外部修改当前 `.pen` 文件时，干净画布会实时重载；存在未保存修改时会暂停保存并
+要求用户选择磁盘版本或画布版本。Script 引用文件也通过 editor 的 `watch-file` 协议实时刷新。
+
 ## 目录结构
 
 ```text
@@ -49,7 +53,9 @@ packages/pen-dev-bridge/
   lib/canvas-host.js        会话绑定、文档保存、editor IPC 路由
   lib/canvas-transport.js   请求队列、长轮询、取消和响应配对
   lib/editor-assets.js      官方 editor dist 定位、注入与静态响应
+  lib/ipc-binary.js         浏览器 IPC 中 ArrayBuffer 的无损传输
   lib/session-store.js      Browser/CLI 登录态复用与安全落盘
+  lib/workspace-resources.js 图片导入、生成图、文件监听与设计库
   lib/workspace-path.js     session 工作区与路径边界
   lib/legacy-tools.js       可选的一次性 CLI 工具
   lib/client.js             Harness Browser 分屏/浮动画布
@@ -61,6 +67,7 @@ tests/
   live-canvas.test.mjs      真实协议形状的 Agent/Canvas 模拟
   host-components.test.mjs  editor 资源注入与登录态权限
   workspace-path.test.mjs   路径与符号链接边界
+  workspace-resources.test.mjs 资源导入、二进制 IPC、监听与设计库
 scripts/verify.cjs          包结构和关键约束检查
 ```
 
@@ -109,6 +116,11 @@ pen.dev 的授权，因此目前不会把官方 dist 直接提交进本仓库。
   的 `.pen` 文件。
 - editor iframe 在当前会话中保持挂载，Agent 切换文件时不会因 React 重建 iframe 而丢引擎。
 - 用户手工编辑每 6 秒触发保存；Agent 编辑则逐次等待保存确认。
+- 从画布导入的图片和 Figma 内嵌图片保存到当前设计旁的 `images/`；SVG 由官方 editor 转成节点；
+  生成图片同样持久化到 `images/`，不会只存在于引擎内存。
+- 工作区内的 `*.lib.pen` 和官方 CLI 随附的只读设计库会出现在 editor 的设计库列表；当前普通
+  `.pen` 文件也可通过官方 editor 菜单转换为不覆盖已有文件的 `.lib.pen`。
+- 外部文件冲突会在顶栏显示“磁盘冲突”，自动保存与 editor 主动保存都会暂停，直到明确选择版本。
 - 截图会保存为 Harness attachment，并向模型返回真正的 image block，而不是 base64 文本提示。
 - 工具取消后，尚未交付 editor 的请求会从队列删除；已经交付的请求会明确提示先检查画布状态，
   避免盲目重试造成重复编辑。
@@ -119,9 +131,11 @@ pen.dev 的授权，因此目前不会把官方 dist 直接提交进本仓库。
 node scripts/verify.cjs
 node tests/host-components.test.mjs
 node tests/workspace-path.test.mjs
+node tests/workspace-resources.test.mjs
 node tests/live-canvas.test.mjs
 ```
 
-`live-canvas.test.mjs` 模拟真实 Agent 工具调用和官方 editor IPC：连续编辑三个区块、保存到磁盘、
-切换并重开文件、返回截图附件、取消排队请求、解绑会话，并确认整个 live canvas 路径没有启动
-headless 子进程。
+`live-canvas.test.mjs` 模拟真实 Agent 工具调用和官方 editor IPC：连续编辑、选区上下文、原子保存、
+外部热重载与两种冲突决议、切换并重开文件、截图附件、取消请求和解绑会话，并确认整个 live
+canvas 路径没有启动 headless 子进程。`workspace-resources.test.mjs` 另外覆盖图片/SVG/Figma 资源
+落盘、生成图片、Script 文件监听、工作区/内置设计库和嵌套二进制 IPC。

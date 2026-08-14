@@ -5,6 +5,7 @@ import { Readable } from 'node:stream'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 
 const toolFixture = new URL('./fixtures/dsh-tools.mjs', import.meta.url).href
 registerHooks({
@@ -21,6 +22,7 @@ const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'pen-live-canvas-'))
 const tools = new Map()
 const routes = new Map()
 const cleanups = []
+const eventHandlers = new Map()
 const sessions = new Map([['canvas-agent', { header: { cwd: workspace } }]])
 let subprocessSpawns = 0
 let savedImages = 0
@@ -48,6 +50,7 @@ const ctx = {
     return undefined
   },
   tools: { register(tool) { tools.set(tool.name, tool); return () => tools.delete(tool.name) } },
+  on(name, handler) { eventHandlers.set(name, handler); return () => eventHandlers.delete(name) },
   effect(setup) { const cleanup = setup(); if (typeof cleanup === 'function') cleanups.push(cleanup) },
 }
 
@@ -96,6 +99,7 @@ let running = true
 let liveDocument = { version: '2.14', children: [], fileToken: 'canvas-test' }
 let liveFile = path.join(workspace, 'designs', 'design.pen')
 let canvasMutations = 0
+let selectedElements = []
 let pauseAfterBatch = false
 let pausedResolve
 let resumeResolve
@@ -103,6 +107,16 @@ let resumeResolve
 async function postIpc(message) {
   const response = await http('/pen-host/ipc', { method: 'POST', query, body: message })
   assert.equal(response.status, 200, response.text)
+}
+
+async function requestIpc(method, payload) {
+  const response = await http('/pen-host/ipc', {
+    method: 'POST', query, body: { id: 'host-' + Date.now() + '-' + Math.random(), type: 'request', method, payload },
+  })
+  assert.equal(response.status, 200, response.text)
+  const message = response.json()
+  assert.equal(message.error, undefined, message.error && message.error.message)
+  return message.payload
 }
 
 async function fakeEditor() {
@@ -119,7 +133,10 @@ async function fakeEditor() {
       if (message.type !== 'request') continue
       if (message.method === 'get-editor-state') {
         const names = liveDocument.children.map((node) => node.name).join(', ')
-        await postIpc({ id: message.id, type: 'response', method: message.method, payload: { success: true, result: { message: 'Canvas nodes (' + liveDocument.children.length + '): ' + names } } })
+        const selected = selectedElements.length
+          ? '\n\n## Selected Elements:\n' + selectedElements.map((node) => '- `' + node.id + '` (' + node.type + '): ' + node.name).join('\n') + '\n\n## Canvas Design'
+          : ''
+        await postIpc({ id: message.id, type: 'response', method: message.method, payload: { success: true, result: { message: 'Canvas nodes (' + liveDocument.children.length + '): ' + names + selected } } })
       } else if (message.method === 'batch-design') {
         const match = /([A-Za-z][A-Za-z0-9_]*)=Insert\([^,]+,\{[^}]*name:\"([^\"]+)\"/.exec(message.payload.input || '')
         assert.ok(match, 'unsupported simulation input')
@@ -163,6 +180,14 @@ function diskState(relative) {
   return { exists: true, bytes: Buffer.byteLength(content), children: parsed.children.length, names: parsed.children.map((node) => node.name) }
 }
 
+async function waitFor(test, timeoutMs = 4000) {
+  const started = Date.now()
+  while (!(await test())) {
+    if (Date.now() - started > timeoutMs) throw new Error('timed out waiting for canvas state')
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+}
+
 try {
   await assert.rejects(
     () => tools.get('pencil_mcp_open').execute({ filePath: '../escaped.pen' }, baseExec),
@@ -170,6 +195,17 @@ try {
   )
 
   await call('pencil_mcp_open', { filePath: 'one.pen' })
+  const imported = await requestIpc('import-file', {
+    fileName: 'agent-vision.png', fileContents: { __penBinaryBase64: Buffer.from('image-bytes').toString('base64') },
+  })
+  assert.equal(imported.filePath, './images/agent-vision.png')
+  const importedBytes = await requestIpc('read-file', pathToFileURL(path.join(workspace, 'images', 'agent-vision.png')).toString())
+  assert.equal(Buffer.from(importedBytes.__penBinaryBase64, 'base64').toString(), 'image-bytes')
+  const generated = await requestIpc('save-generated-image', { image: Buffer.from('generated-image').toString('base64') })
+  assert.match(generated.relativePath, /^\.\/images\/generated-.+\.png$/)
+  fs.writeFileSync(path.join(workspace, 'workspace-kit.lib.pen'), JSON.stringify({ version: '2.14', children: [] }))
+  const libraries = await requestIpc('find-libraries', {})
+  assert.ok(libraries.includes(pathToFileURL(path.join(workspace, 'workspace-kit.lib.pen')).toString()))
   for (const name of ['Hero', 'Features', 'Footer']) {
     const before = canvasMutations
     const result = await call('pencil_mcp_execute', {
@@ -180,11 +216,53 @@ try {
   }
   assert.deepEqual(diskState('one.pen').names, ['Hero', 'Features', 'Footer'])
 
+  selectedElements = [liveDocument.children[0], liveDocument.children[2]]
+  const assembly = { contexts: [] }
+  let continued = false
+  await eventHandlers.get('system-prompt/assemble')(
+    assembly,
+    { agent: baseExec.agent, signal: baseExec.signal },
+    async () => { continued = true },
+  )
+  assert.equal(continued, true)
+  assert.equal(assembly.contexts.length, 1)
+  assert.equal(assembly.contexts[0].name, 'pen-dev:selection')
+  assert.match(assembly.contexts[0].text, /`node-1` \(frame\): Hero/)
+  assert.match(assembly.contexts[0].text, /`node-3` \(frame\): Footer/)
+  selectedElements = []
+
+  await new Promise((resolve) => setTimeout(resolve, 550))
+  const external = { version: '2.14', children: [{ id: 'external', type: 'frame', name: 'External' }], fileToken: 'external-clean' }
+  fs.writeFileSync(path.join(workspace, 'one.pen'), JSON.stringify(external))
+  await waitFor(() => liveDocument.children.some((node) => node.name === 'External'))
+  assert.equal((await http('/pen-host/state', { query })).json().conflict, null)
+
+  liveDocument.children.push({ id: 'unsaved', type: 'frame', name: 'Unsaved' })
+  await postIpc({ id: 'dirty-reload', type: 'notification', method: 'file-changed', payload: {} })
+  await new Promise((resolve) => setTimeout(resolve, 550))
+  const diskWins = { version: '2.14', children: [{ id: 'disk', type: 'frame', name: 'DiskWins' }], fileToken: 'external-dirty' }
+  fs.writeFileSync(path.join(workspace, 'one.pen'), JSON.stringify(diskWins))
+  await waitFor(async () => !!(await http('/pen-host/state', { query })).json().conflict)
+  const reloadedConflict = await http('/pen-host/conflict', { method: 'POST', query, body: { action: 'reload' } })
+  assert.equal(reloadedConflict.status, 200, reloadedConflict.text)
+  await waitFor(() => liveDocument.children.some((node) => node.name === 'DiskWins'))
+  assert.deepEqual(diskState('one.pen').names, ['DiskWins'])
+
+  liveDocument.children.push({ id: 'local', type: 'frame', name: 'LocalWins' })
+  await postIpc({ id: 'dirty-overwrite', type: 'notification', method: 'file-changed', payload: {} })
+  await new Promise((resolve) => setTimeout(resolve, 550))
+  const diskLoses = { version: '2.14', children: [{ id: 'disk-loses', type: 'frame', name: 'DiskLoses' }], fileToken: 'external-overwrite' }
+  fs.writeFileSync(path.join(workspace, 'one.pen'), JSON.stringify(diskLoses))
+  await waitFor(async () => !!(await http('/pen-host/state', { query })).json().conflict)
+  const overwrittenConflict = await http('/pen-host/conflict', { method: 'POST', query, body: { action: 'overwrite' } })
+  assert.equal(overwrittenConflict.status, 200, overwrittenConflict.text)
+  assert.deepEqual(diskState('one.pen').names, ['DiskWins', 'LocalWins'])
+
   await call('pencil_mcp_open', { filePath: 'two.pen' })
   await call('pencil_mcp_open', { filePath: 'one.pen' })
   const reopened = await call('pencil_mcp_get_app_state', { include_schema: false })
-  assert.match(reopened.text, /Hero/)
-  assert.match(reopened.text, /Footer/)
+  assert.match(reopened.text, /DiskWins/)
+  assert.match(reopened.text, /LocalWins/)
 
   const screenshot = await call('pencil_mcp_get_screenshot', { filePath: 'one.pen', nodeId: 'document' })
   assert.equal(screenshot.image.attachmentId, 'test-image-1')
@@ -215,6 +293,11 @@ try {
   assert.equal(savedImages, 1)
   assert.equal(canvasMutations, 3)
   assert.equal(liveFile, path.join(workspace, 'one.pen'))
+
+  await postIpc({ id: 'make-library', type: 'notification', method: 'turn-into-library', payload: {} })
+  await waitFor(async () => (await http('/pen-host/state', { query })).json().file.endsWith('one.lib.pen'))
+  assert.equal(fs.existsSync(path.join(workspace, 'one.pen')), false)
+  assert.deepEqual(diskState('one.lib.pen').names, ['DiskWins', 'LocalWins'])
 
   running = false
   const unbound = await http('/pen-host/unbind', { method: 'POST', query })

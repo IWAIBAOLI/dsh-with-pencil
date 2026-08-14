@@ -97,9 +97,9 @@ try {
     fail('bundle patch must insert { id: pen-dev-bridge, name: pen-dev-bridge }')
   } else ok('bundle patch inserts pen-dev-bridge row')
   const patch = patchText('bundles/pen-dev-bridge-bundle/cordis.patch.yml')
-  if (!patch.includes("inject: ['tools', 'subprocess', 'sandboxPolicy', 'webServer', 'sessions', 'attachments']") && !patch.includes('inject: ["tools", "subprocess", "sandboxPolicy", "webServer", "sessions", "attachments"]')) {
-    fail('bundle patch row must inject [tools, subprocess, sandboxPolicy, webServer, sessions, attachments]')
-  } else ok('bundle patch row injects tool, process, web, session, and attachment services')
+  if (!patch.includes("inject: ['tools', 'subprocess', 'sandboxPolicy', 'webServer', 'sessions', 'attachments', 'systemPrompt']") && !patch.includes('inject: ["tools", "subprocess", "sandboxPolicy", "webServer", "sessions", "attachments", "systemPrompt"]')) {
+    fail('bundle patch row must inject tool, process, web, session, attachment, and system-prompt services')
+  } else ok('bundle patch row injects tool, process, web, session, attachment, and system-prompt services')
 } catch (err) { fail('bundle patch: ' + err.message) }
 try {
   parseYaml('profiles/pen-dev-bridge-template/cordis.yml')
@@ -117,6 +117,8 @@ let canvasHostSource = ''
 let canvasTransportSource = ''
 let editorAssetsSource = ''
 let sessionStoreSource = ''
+let ipcBinarySource = ''
+let workspaceResourcesSource = ''
 try {
   const pluginPath = path.join(root, 'packages/pen-dev-bridge/lib/index.js')
   execFileSync(process.execPath, ['--check', pluginPath], { stdio: 'pipe' })
@@ -153,6 +155,8 @@ for (const [name, assign] of [
   ['canvas-transport.js', (source) => { canvasTransportSource = source }],
   ['editor-assets.js', (source) => { editorAssetsSource = source }],
   ['session-store.js', (source) => { sessionStoreSource = source }],
+  ['ipc-binary.js', (source) => { ipcBinarySource = source }],
+  ['workspace-resources.js', (source) => { workspaceResourcesSource = source }],
 ]) {
   try {
     const modulePath = path.join(root, 'packages/pen-dev-bridge/lib', name)
@@ -231,7 +235,7 @@ if (!canvasHostSource.includes("path: '/pen-host/files'") || !canvasHostSource.i
 if (!canvasHostSource.includes("case 'get-session': out = sessionStore.get()") || !sessionStoreSource.includes("return { email: state.email, token: state.token }")) {
   fail('new conversation canvases must reuse profile-level email and token')
 } else ok('new conversation canvases reuse profile-level email and token')
-if (!editorAssetsSource.includes('function __penDecodeResponse(resp)') || !canvasHostSource.includes("out = { __penBinaryBase64: content.toString('base64') }") || canvasHostSource.includes('insideWorkspace(binding, payload.uri)')) {
+if (!editorAssetsSource.includes('function __penEncodeValue(value)') || !editorAssetsSource.includes('function __penDecodeValue(value)') || !ipcBinarySource.includes('export function encodeIpcBinary') || !ipcBinarySource.includes('export function decodeIpcBinary') || canvasHostSource.includes('insideWorkspace(binding, payload.uri)')) {
   fail('editor file IPC must transport raw URI payloads and binary file content')
 } else ok('editor file IPC transports raw URI payloads and binary file content')
 if (!canvasHostSource.includes("const EDITOR_SCHEMA_VERSION = '2.14'") || !canvasHostSource.includes('document.version !== EDITOR_SCHEMA_VERSION') || !canvasHostSource.includes('async function queueCurrentFile(binding)') || !canvasHostSource.includes("msg.method === 'initialized'") || !canvasHostSource.includes("transport.notify(binding, 'file-update'")) {
@@ -273,6 +277,15 @@ if (!sessionStoreSource.includes('fs.chmodSync(stateFile, 0o600)') || !sessionSt
 if (!modelToolsSource.includes("attachments.saveImage") || !modelToolsSource.includes("blocks.push({ type: 'image', attachment: value.image })")) {
   fail('Pencil screenshots must return a real model-visible image block')
 } else ok('Pencil screenshots return a model-visible image block')
+if (!pluginSource.includes("ctx.on('system-prompt/assemble'") || !canvasHostSource.includes("transport.request(binding, 'get-editor-state'") || !canvasHostSource.includes('Current pen.dev canvas selection')) {
+  fail('selected canvas nodes must be injected into the owning conversation context')
+} else ok('selected canvas nodes are injected into the owning conversation context')
+if (!workspaceResourcesSource.includes('fs.watchFile(target') || !canvasHostSource.includes('handleExternalDocumentChange') || !canvasHostSource.includes("path: '/pen-host/conflict'") || !canvasHostSource.includes('if (!binding.conflict && binding.currentFile')) {
+  fail('external edits must reload clean documents and protect dirty documents from overwrite')
+} else ok('external edits reload clean documents and protect dirty documents from overwrite')
+if (!workspaceResourcesSource.includes('async function importFiles') || !workspaceResourcesSource.includes('async function saveGeneratedImage') || !workspaceResourcesSource.includes('async function findLibraries') || !workspaceResourcesSource.includes("endsWith('.lib.pen')")) {
+  fail('workspace resources must support binary imports, generated images, and design libraries')
+} else ok('workspace resources support binary imports, generated images, and design libraries')
 
 console.log('[4d] module boundaries')
 if (!pluginSource.includes('createHeadlessRuntime') || !pluginSource.includes('registerModelTools') || !pluginSource.includes('registerCanvasHost')) {
@@ -281,9 +294,9 @@ if (!pluginSource.includes('createHeadlessRuntime') || !pluginSource.includes('r
 if (pluginSource.includes("register('pencil_") || pluginSource.includes("path: '/pen-host/")) {
   fail('entrypoint must not contain model tool definitions or Canvas Host routes')
 } else ok('entrypoint contains no tool definitions or Canvas Host routes')
-if (!canvasHostSource.includes('createCanvasTransport()') || !canvasHostSource.includes('createEditorAssets(') || !canvasHostSource.includes('createSessionStore()')) {
-  fail('Canvas Host must delegate transport, editor assets, and credential storage')
-} else ok('Canvas Host delegates transport, editor assets, and credential storage')
+if (!canvasHostSource.includes('createCanvasTransport()') || !canvasHostSource.includes('createEditorAssets(') || !canvasHostSource.includes('createSessionStore()') || !canvasHostSource.includes('createWorkspaceResources(')) {
+  fail('Canvas Host must delegate transport, editor assets, credentials, and workspace resources')
+} else ok('Canvas Host delegates transport, editor assets, credentials, and workspace resources')
 
 // 5. profile template composition
 console.log('[5] profile template')

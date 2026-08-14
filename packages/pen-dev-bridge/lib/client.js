@@ -36,6 +36,9 @@ window.__ModuleLoader__.load({
 .dsh-penhost-menu-note { padding: 8px; color: var(--dsw-alias-label-secondary, #9aa0b4); font-size: 11px; }
 .dsh-penhost-mode { border: 1px solid var(--dsw-alias-border-l1, #34353d); background: transparent; color: var(--dsw-alias-label-primary, #eee); cursor: pointer; font-size: 11px; padding: 3px 8px; border-radius: 6px; }
 .dsh-penhost-mode:hover { border-color: var(--dsw-alias-brand-primary, #4f7cff); }
+.dsh-penhost-conflict { color: #ffb454; border-color: #ffb454; white-space: nowrap; }
+.dsh-penhost-conflict-menu { left: auto; right: 0; width: 310px; }
+.dsh-penhost-danger { color: #ff8f8f; }
 .dsh-penhost-close { margin-left: auto; border: none; background: transparent; color: var(--dsw-alias-label-secondary, #9aa0b4); cursor: pointer; font-size: 13px; padding: 2px 8px; border-radius: 6px; }
 .dsh-penhost-close:hover { background: rgba(255,255,255,.08); color: var(--dsw-alias-label-primary, #eee); }
 .dsh-penhost-body { flex: 1; min-height: 0; }
@@ -56,7 +59,7 @@ html[data-penhost-pointer="drag"], html[data-penhost-pointer="drag"] * { cursor:
 `
 
 		const DEFAULT_SPLIT_RATIO = 0.42
-		const EMPTY_SESSION = Object.freeze({ open: false, mode: 'split', ratio: DEFAULT_SPLIT_RATIO, pos: null, binding: null, workspace: null, file: null, loading: false, error: null })
+		const EMPTY_SESSION = Object.freeze({ open: false, mode: 'split', ratio: DEFAULT_SPLIT_RATIO, pos: null, binding: null, workspace: null, file: null, conflict: null, loading: false, error: null })
 
 		function insertStyles() {
 			if (typeof document === 'undefined') return () => {}
@@ -177,6 +180,7 @@ html[data-penhost-pointer="drag"], html[data-penhost-pointer="drag"] * { cursor:
 			const resizeRef = React.useRef(null)
 			const menusRef = React.useRef(null)
 			const fileMenuRef = React.useRef(null)
+			const conflictMenuRef = React.useRef(null)
 			const [menu, setMenu] = React.useState(null)
 			const [files, setFiles] = React.useState([])
 			const [filesLoading, setFilesLoading] = React.useState(false)
@@ -228,7 +232,8 @@ html[data-penhost-pointer="drag"], html[data-penhost-pointer="drag"] * { cursor:
 				const onOutside = (event) => {
 					const inWorkspace = menusRef.current && menusRef.current.contains(event.target)
 					const inFile = fileMenuRef.current && fileMenuRef.current.contains(event.target)
-					if (!inWorkspace && !inFile) setMenu(null)
+					const inConflict = conflictMenuRef.current && conflictMenuRef.current.contains(event.target)
+					if (!inWorkspace && !inFile && !inConflict) setMenu(null)
 				}
 				window.addEventListener('pointerdown', onOutside, true)
 				return () => window.removeEventListener('pointerdown', onOutside, true)
@@ -242,8 +247,9 @@ html[data-penhost-pointer="drag"], html[data-penhost-pointer="drag"] * { cursor:
 						const response = await fetch('/pen-host/state?binding=' + encodeURIComponent(state.binding))
 						if (!response.ok) return
 						const result = await response.json()
-						if (!disposed && result.file && result.file !== (store.getSnapshot().sessions[sessionId] || EMPTY_SESSION).file) {
-							store.patch(sessionId, { file: result.file })
+						const current = store.getSnapshot().sessions[sessionId] || EMPTY_SESSION
+						if (!disposed && (result.file !== current.file || (result.conflict || null) !== (current.conflict || null))) {
+							store.patch(sessionId, { file: result.file || current.file, conflict: result.conflict || null })
 						}
 					} catch (error) { /* host may be restarting */ }
 				}
@@ -322,6 +328,19 @@ html[data-penhost-pointer="drag"], html[data-penhost-pointer="drag"] * { cursor:
 				} catch (error) { setMenuError(error && error.message ? error.message : String(error)) }
 			}
 
+			const resolveConflict = async (action) => {
+				setMenuError(null)
+				try {
+					const response = await fetch('/pen-host/conflict?binding=' + encodeURIComponent(state.binding), {
+						method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }),
+					})
+					if (!response.ok) throw new Error((await response.text()) || ('HTTP ' + response.status))
+					const result = await response.json()
+					store.patch(sessionId, { file: result.file || state.file, conflict: result.conflict || null })
+					setMenu(null)
+				} catch (error) { setMenuError(error && error.message ? error.message : String(error)) }
+			}
+
 			const createFile = () => {
 				let file = window.prompt('新建 .pen 文件（相对于当前工作区）', 'designs/untitled.pen')
 				if (file === null) return
@@ -373,6 +392,17 @@ html[data-penhost-pointer="drag"], html[data-penhost-pointer="drag"] * { cursor:
 								title: file, onClick: () => { if (file === currentFile) setMenu(null); else void switchFile(file) },
 							}, file)) : null,
 							menuError ? React.createElement('div', { className: 'dsh-penhost-menu-note' }, menuError) : null) : null),
+					state.conflict ? React.createElement('div', { className: 'dsh-penhost-menu-wrap', ref: conflictMenuRef, onPointerDown: (event) => event.stopPropagation() },
+						React.createElement('button', {
+							className: 'dsh-penhost-mode dsh-penhost-conflict', title: state.conflict, 'aria-haspopup': 'menu', 'aria-expanded': menu === 'conflict',
+							onClick: () => { setMenu(menu === 'conflict' ? null : 'conflict'); setMenuError(null) },
+						}, '磁盘冲突'),
+						menu === 'conflict' ? React.createElement('div', { className: 'dsh-penhost-menu dsh-penhost-conflict-menu', role: 'menu' },
+							React.createElement('div', { className: 'dsh-penhost-menu-note' }, state.conflict),
+							React.createElement('div', { className: 'dsh-penhost-menu-sep' }),
+							React.createElement('button', { className: 'dsh-penhost-menu-item', role: 'menuitem', onClick: () => { void resolveConflict('reload') } }, '重新加载磁盘版本'),
+							React.createElement('button', { className: 'dsh-penhost-menu-item dsh-penhost-danger', role: 'menuitem', onClick: () => { void resolveConflict('overwrite') } }, '保留画布并覆盖磁盘'),
+							menuError ? React.createElement('div', { className: 'dsh-penhost-menu-note' }, menuError) : null) : null) : null,
 					React.createElement('button', {
 						className: 'dsh-penhost-mode',
 						title: isSplit ? '切换为浮动窗口' : '切换为右侧分屏',

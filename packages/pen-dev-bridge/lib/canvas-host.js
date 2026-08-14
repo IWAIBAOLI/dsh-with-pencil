@@ -1,10 +1,12 @@
-import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { createCanvasTransport } from './canvas-transport.js'
 import { createEditorAssets } from './editor-assets.js'
+import { decodeIpcBinary, encodeIpcBinary } from './ipc-binary.js'
 import { createSessionStore } from './session-store.js'
+import { createWorkspaceResources } from './workspace-resources.js'
 import { resolveWorkspacePath } from './workspace-path.js'
 
 /** Mount the session-bound Pencil editor, browser IPC, and live MCP bridge. */
@@ -16,6 +18,7 @@ export function registerCanvasHost({ ctx, sub, mcpBin, headless }) {
   const bindingsBySession = new Map()
   const transport = createCanvasTransport()
   const sessionStore = createSessionStore()
+  const resources = createWorkspaceResources({ mcpBin, transport })
   // This must match CURRENT_SCHEMA_VERSION in the bundled pen-editor assets.
   // The editor rejects every other version instead of migrating it in place.
   const EDITOR_SCHEMA_VERSION = '2.14'
@@ -31,6 +34,7 @@ export function registerCanvasHost({ ctx, sub, mcpBin, headless }) {
   }
   function releaseBinding(binding, reason) {
     if (!binding) return
+    resources.cleanup(binding)
     transport.close(binding, reason || new Error('pen.dev canvas binding released'))
     bindings.delete(binding.key)
     if (bindingsBySession.get(binding.sessionId) === binding.key) bindingsBySession.delete(binding.sessionId)
@@ -49,14 +53,14 @@ export function registerCanvasHost({ ctx, sub, mcpBin, headless }) {
   }
   async function inspectCanvasFile(target) {
     const content = await fsp.readFile(target, 'utf8')
-    const document = JSON.parse(content)
-    if (!document || !Array.isArray(document.children)) throw new Error('saved .pen file is not a valid document')
+    const document = validateDocument(content)
     return { bytes: Buffer.byteLength(content), children: document.children.length }
   }
   async function saveCanvas(binding) {
     if (!binding.initialized || binding.loadedFile !== binding.currentFile) {
       throw new Error('canvas document is not ready to save')
     }
+    if (binding.conflict) throw new Error('the .pen file changed on disk; resolve the canvas conflict before saving')
     if (!binding.dirty) {
       try { return await inspectCanvasFile(binding.currentFile) }
       catch (err) {
@@ -85,9 +89,7 @@ export function registerCanvasHost({ ctx, sub, mcpBin, headless }) {
   }
   function uriToPath(uri) {
     const s = String(uri || '')
-    if (s.indexOf('file://') === 0) {
-      try { return decodeURIComponent(s.slice(7)) } catch (err) { return s.slice(7) }
-    }
+    if (s.startsWith('file:')) try { return fileURLToPath(s) } catch (error) { /* validate as a path below */ }
     return s
   }
 
@@ -114,15 +116,47 @@ export function registerCanvasHost({ ctx, sub, mcpBin, headless }) {
       try { await fsp.unlink(temporary) } catch (err) { /* rename already removed it */ }
     }
   }
+  function validateDocument(content) {
+    const document = JSON.parse(content)
+    if (!document || document.version !== EDITOR_SCHEMA_VERSION || !Array.isArray(document.children)) {
+      throw new Error('Unsupported .pen format ' + (document && document.version ? document.version : 'unknown') + '; this editor requires ' + EDITOR_SCHEMA_VERSION)
+    }
+    return document
+  }
+  function handleExternalDocumentChange(binding, change) {
+    void enqueueCanvas(binding, async () => {
+      if (binding.currentFile !== change.target || binding.loadedFile !== change.target) return
+      let document
+      try {
+        if (change.error) throw change.error
+        document = validateDocument(change.content)
+      } catch (error) {
+        binding.conflict = '磁盘上的 .pen 文件已删除或内容无效：' + (error && error.message ? error.message : String(error))
+        return
+      }
+      if (binding.dirty || binding.saveRequested) {
+        binding.conflict = '磁盘文件在画布存在未保存修改时被外部更新。请选择重新加载或保留画布版本。'
+        return
+      }
+      binding.conflict = null
+      binding.dirty = false
+      resources.rememberDocument(binding, change.target, change.content)
+      transport.notify(binding, 'file-update', {
+        fileURI: pathToFileURL(change.target).toString(),
+        content: change.content,
+        zoomToFit: false,
+        isDirty: false,
+        displayName: path.basename(change.target),
+      })
+      console.log('[pen-dev-bridge] reloaded externally changed canvas:', change.target, '(' + document.children.length + ' top-level nodes)')
+    }).catch((error) => console.warn('[pen-dev-bridge] external canvas reload failed:', error && error.message))
+  }
   async function queueCurrentFile(binding) {
     const target = binding.currentFile
     let content
     try {
       content = await fsp.readFile(target, 'utf8')
-      const document = JSON.parse(content)
-      if (!document || document.version !== EDITOR_SCHEMA_VERSION) {
-        throw new Error('Unsupported .pen format ' + (document && document.version ? document.version : 'unknown') + '; this editor requires ' + EDITOR_SCHEMA_VERSION)
-      }
+      validateDocument(content)
     } catch (err) {
       if (!err || err.code !== 'ENOENT') {
         binding.loadedFile = null
@@ -136,15 +170,18 @@ export function registerCanvasHost({ ctx, sub, mcpBin, headless }) {
     }
     binding.loadedFile = target
     binding.dirty = false
+    binding.conflict = null
     binding.autosaveAfter = Date.now() + 6000
+    resources.rememberDocument(binding, target, content)
     transport.notify(binding, 'file-update', {
-      fileURI: 'file://' + target, content, zoomToFit: true, isDirty: false, displayName: path.basename(target),
+      fileURI: pathToFileURL(target).toString(), content, zoomToFit: true, isDirty: false, displayName: path.basename(target),
     })
   }
   const autosaveTimer = setInterval(() => {
     for (const binding of bindings.values()) {
       if (binding.loadedFile !== binding.currentFile) continue
       if (!binding.dirty) continue
+      if (binding.conflict) continue
       if (Date.now() < binding.autosaveAfter) continue
       if (binding.queue.length >= 8) continue
       void enqueueCanvas(binding, () => saveCanvas(binding)).catch((err) => {
@@ -160,7 +197,7 @@ export function registerCanvasHost({ ctx, sub, mcpBin, headless }) {
       body += chunk
       if (body.length > 64 * 1024 * 1024) throw new Error('request too large')
     }
-    return JSON.parse(body || '{}')
+    return decodeIpcBinary(JSON.parse(body || '{}'))
   }
   async function handleBind(req, res) {
     let body
@@ -195,8 +232,10 @@ export function registerCanvasHost({ ctx, sub, mcpBin, headless }) {
       key, sessionId, workspace, currentFile, loadedFile: null, autosaveAfter: Infinity,
       queue: [], pollWaiters: [], pendingRequests: new Map(), saveRevision: 0,
       saveWaiters: [], saveRequested: false, dirty: false, initialized: false, lastSeen: 0,
-      serial: Promise.resolve(),
+      serial: Promise.resolve(), conflict: null, documentFingerprint: null, documentWatcher: null,
+      resourceWatchers: new Map(), onExternalDocumentChange: null,
     }
+    binding.onExternalDocumentChange = (change) => handleExternalDocumentChange(binding, change)
     bindings.set(key, binding)
     bindingsBySession.set(sessionId, key)
     res.writeHead(200, { 'Content-Type': 'application/json' })
@@ -263,6 +302,7 @@ export function registerCanvasHost({ ctx, sub, mcpBin, headless }) {
         if (binding.initialized && binding.loadedFile === binding.currentFile) await saveCanvas(binding)
         binding.currentFile = target
         binding.loadedFile = null
+        binding.conflict = null
         binding.autosaveAfter = Infinity
         await queueCurrentFile(binding)
         if (binding.loadedFile !== target) throw new Error('canvas refused to load ' + target)
@@ -271,6 +311,62 @@ export function registerCanvasHost({ ctx, sub, mcpBin, headless }) {
     catch (err) { res.writeHead(500); res.end(err.message); return }
     res.writeHead(200, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify({ file: target }))
+  }
+  async function handleConflict(req, res) {
+    const binding = bindingOf(req)
+    if (!binding) { res.writeHead(401); res.end('invalid canvas binding'); return }
+    let body
+    try { body = await readBody(req) }
+    catch (error) { res.writeHead(400); res.end('bad json'); return }
+    const action = String(body.action || '')
+    try {
+      await enqueueCanvas(binding, async () => {
+        if (!binding.conflict) return
+        if (action === 'reload') {
+          const content = await fsp.readFile(binding.currentFile, 'utf8')
+          validateDocument(content)
+          binding.conflict = null
+          binding.dirty = false
+          binding.loadedFile = binding.currentFile
+          binding.autosaveAfter = Date.now() + 6000
+          resources.rememberDocument(binding, binding.currentFile, content)
+          transport.notify(binding, 'file-update', {
+            fileURI: pathToFileURL(binding.currentFile).toString(),
+            content,
+            zoomToFit: false,
+            isDirty: false,
+            displayName: path.basename(binding.currentFile),
+          })
+        } else if (action === 'overwrite') {
+          const conflict = binding.conflict
+          binding.conflict = null
+          binding.dirty = true
+          try { await saveCanvas(binding) }
+          catch (error) { binding.conflict = conflict; throw error }
+        } else {
+          throw new Error('action must be reload or overwrite')
+        }
+      })
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ ok: true, file: binding.currentFile, conflict: binding.conflict }))
+    } catch (error) {
+      res.writeHead(409); res.end(error && error.message ? error.message : String(error))
+    }
+  }
+  async function turnCurrentIntoLibrary(binding) {
+    await enqueueCanvas(binding, async () => {
+      if (binding.conflict) throw new Error('resolve the external file conflict first')
+      try { await fsp.access(binding.currentFile) }
+      catch (error) { if (error && error.code === 'ENOENT') binding.dirty = true; else throw error }
+      await saveCanvas(binding)
+      const target = await resources.nextLibraryPath(binding)
+      resources.stopDocumentWatcher(binding)
+      await fsp.rename(binding.currentFile, target)
+      binding.currentFile = target
+      binding.loadedFile = null
+      binding.conflict = null
+      await queueCurrentFile(binding)
+    })
   }
   async function handleReveal(req, res) {
     const binding = bindingOf(req)
@@ -307,6 +403,7 @@ export function registerCanvasHost({ ctx, sub, mcpBin, headless }) {
           const uri = typeof msg.payload === 'string' ? msg.payload : msg.payload && msg.payload.uri
           binding.currentFile = insideWorkspace(binding, uri)
           binding.loadedFile = null
+          binding.conflict = null
           binding.autosaveAfter = Infinity
         }
         catch (err) { res.writeHead(403); res.end('forbidden'); return }
@@ -314,11 +411,21 @@ export function registerCanvasHost({ ctx, sub, mcpBin, headless }) {
         if (binding.loadedFile === binding.currentFile) binding.dirty = true
       } else if (msg.method === 'set-session') {
         sessionStore.set(msg.payload)
+      } else if (msg.method === 'load-file') {
+        const requested = msg.payload && msg.payload.filePath ? msg.payload.filePath : msg.payload
+        void enqueueCanvas(binding, () => selectCanvasFile(binding, requested))
+          .catch((error) => console.warn('[pen-dev-bridge] editor load-file failed:', error && error.message))
+      } else if (msg.method === 'turn-into-library') {
+        void turnCurrentIntoLibrary(binding)
+          .catch((error) => console.warn('[pen-dev-bridge] turn-into-library failed:', error && error.message))
       } else if (msg.method === 'save-resource') {
-        if (binding.currentFile && binding.loadedFile === binding.currentFile && (binding.saveRequested || Date.now() >= binding.autosaveAfter) && msg.payload && msg.payload.content !== undefined) {
+        if (!binding.conflict && binding.currentFile && binding.loadedFile === binding.currentFile && (binding.saveRequested || Date.now() >= binding.autosaveAfter) && msg.payload && msg.payload.content !== undefined) {
           try {
             const target = insideWorkspace(binding, binding.currentFile)
-            await writeFileAtomic(target, String(msg.payload.content))
+            const content = String(msg.payload.content)
+            validateDocument(content)
+            await writeFileAtomic(target, content)
+            resources.rememberDocument(binding, target, content)
             binding.dirty = false
             binding.saveRevision += 1
             for (const waiter of binding.saveWaiters.slice()) {
@@ -341,50 +448,45 @@ export function registerCanvasHost({ ctx, sub, mcpBin, headless }) {
     if (msg.type !== 'request') { res.writeHead(200); res.end('{}'); return }
     const payload = msg.payload || {}
     let out
-    switch (msg.method) {
-      case 'get-session': out = sessionStore.get(); break
-      case 'get-current-workspace': out = { label: 'DeepSeek Harness', rootPath: binding.workspace }; break
-      case 'get-device-id': out = { deviceId: 'dsh-local' }; break
-      case 'get-last-online-at': out = { lastOnlineAt: Date.now() }; break
-      case 'read-file': {
-        let target
-        try {
-          target = insideWorkspace(binding, payload)
-          const content = await fsp.readFile(target)
-          out = { __penBinaryBase64: content.toString('base64') }
-        } catch (err) {
-          out = { __penBinaryBase64: '' }
+    try {
+      switch (msg.method) {
+        case 'get-session': out = sessionStore.get(); break
+        case 'get-current-workspace': out = { label: 'DeepSeek Harness', rootPath: binding.workspace }; break
+        case 'get-device-id': out = { deviceId: 'dsh-local' }; break
+        case 'get-last-online-at': out = { timestamp: Date.now(), lastOnlineAt: Date.now() }; break
+        case 'read-file': out = await resources.readFile(binding, payload); break
+        case 'stat-file': {
+          try { out = await resources.statFile(binding, payload) }
+          catch (error) { out = { exists: false, isFile: false } }
+          break
         }
-        break
+        case 'watch-file': resources.watchFile(binding, payload); out = undefined; break
+        case 'unwatch-file': resources.unwatchFile(binding, payload); out = undefined; break
+        case 'save-generated-image': out = await resources.saveGeneratedImage(binding, payload); break
+        case 'import-file': out = await resources.importFile(binding, payload); break
+        case 'import-files': out = await resources.importFiles(binding, payload); break
+        case 'import-uri': out = await resources.importUri(binding, payload); break
+        case 'find-libraries': out = await resources.findLibraries(binding); break
+        case 'browse-libraries': out = await resources.browseLibraries(binding, !!payload.multiple); break
+        case 'new-file-picker:get-data':
+        case 'new-file-picker:delete-recent': out = { templates: [], recentFiles: [] }; break
+        default:
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ id: msg.id, type: 'response', method: msg.method, error: { code: 'METHOD_NOT_FOUND', message: 'No handler for ' + msg.method } }))
+          return
       }
-      case 'stat-file': {
-        try {
-          const st = await fsp.stat(insideWorkspace(binding, payload))
-          out = { exists: true, isFile: st.isFile() }
-        } catch (err) { out = { exists: false, isFile: false } }
-        break
-      }
-      case 'find-libraries': {
-        try {
-          const dataDir = path.join(path.dirname(mcpBin), 'data')
-          const libs = fs.readdirSync(dataDir)
-            .filter((n) => n.endsWith('.lib.pen'))
-            .map((n) => 'file://' + path.join(dataDir, n))
-          out = libs
-        } catch (err) { out = [] }
-        break
-      }
-      case 'new-file-picker:get-data':
-      case 'new-file-picker:delete-recent': out = { templates: [], recentFiles: [] }; break
-      case 'import-file': out = { filePath: null }; break
-      case 'import-files': out = []; break
-      default:
-        res.writeHead(200, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ id: msg.id, type: 'response', method: msg.method, error: { code: 'METHOD_NOT_FOUND', message: 'No handler for ' + msg.method } }))
-        return
+    } catch (error) {
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({
+        id: msg.id,
+        type: 'response',
+        method: msg.method,
+        error: { code: 'HOST_ERROR', message: error && error.message ? error.message : String(error) },
+      }))
+      return
     }
     res.writeHead(200, { 'Content-Type': 'application/json' })
-    res.end(JSON.stringify({ id: msg.id, type: 'response', method: msg.method, payload: out }))
+    res.end(JSON.stringify(encodeIpcBinary({ id: msg.id, type: 'response', method: msg.method, payload: out })))
   }
 
   const canvasMethods = {
@@ -492,6 +594,33 @@ export function registerCanvasHost({ ctx, sub, mcpBin, headless }) {
     },
   }
 
+  async function selectionContext(agent, signal) {
+    const sessionId = String(agent && agent.session && agent.session.id || '')
+    const key = bindingsBySession.get(sessionId)
+    const binding = key ? bindings.get(key) : undefined
+    if (!binding || !binding.initialized || binding.loadedFile !== binding.currentFile || Date.now() - binding.lastSeen > 30000) return ''
+    const selectedFile = binding.currentFile
+    try {
+      const response = await transport.request(binding, 'get-editor-state', { include_schema: false }, 3000, signal)
+      if (binding.currentFile !== selectedFile || binding.loadedFile !== selectedFile || response && response.success === false) return ''
+      const result = response && Object.prototype.hasOwnProperty.call(response, 'result') ? response.result : response
+      const message = String(result && result.message || '')
+      const selected = /## Selected Elements:\s*\n([\s\S]*?)(?:\n\n#{1,6}\s|$)/.exec(message)
+      if (!selected || !selected[1].trim()) return ''
+      const lines = selected[1].split('\n').filter((line) => /^- `[^`]+`/.test(line.trim())).slice(0, 30)
+      if (!lines.length) return ''
+      const relativeFile = path.relative(binding.workspace, selectedFile).split(path.sep).join('/')
+      return [
+        'Current pen.dev canvas selection for this Harness conversation:',
+        '- Active file: `' + relativeFile + '`',
+        ...lines,
+        'When the user refers to “this”, “这些” or the current selection, use these node IDs unless they explicitly name another target.',
+      ].join('\n')
+    } catch (error) {
+      return ''
+    }
+  }
+
   headless.setCanvasBridge(canvasBridge)
 
   const routeDisposers = []
@@ -504,6 +633,7 @@ export function registerCanvasHost({ ctx, sub, mcpBin, headless }) {
   routeDisposers.push(webServer.register({ kind: 'exact', path: '/pen-host/unbind', handler: handleUnbind }))
   routeDisposers.push(webServer.register({ kind: 'exact', path: '/pen-host/files', handler: handleFiles }))
   routeDisposers.push(webServer.register({ kind: 'exact', path: '/pen-host/file', handler: handleFile }))
+  routeDisposers.push(webServer.register({ kind: 'exact', path: '/pen-host/conflict', handler: handleConflict }))
   routeDisposers.push(webServer.register({ kind: 'exact', path: '/pen-host/reveal', handler: handleReveal }))
   routeDisposers.push(webServer.register({ kind: 'exact', path: '/pen-host/ipc', handler: handleIpc }))
   routeDisposers.push(webServer.register({ kind: 'exact', path: '/pen-host/pending', handler: async (req, res) => {
@@ -515,7 +645,11 @@ export function registerCanvasHost({ ctx, sub, mcpBin, headless }) {
     const binding = bindingOf(req)
     if (!binding) { res.writeHead(401); res.end('invalid canvas binding'); return }
     res.writeHead(200, { 'Content-Type': 'application/json' })
-    res.end(JSON.stringify({ file: binding.currentFile, connected: binding.initialized && Date.now() - binding.lastSeen < 30000 }))
+    res.end(JSON.stringify({
+      file: binding.currentFile,
+      connected: binding.initialized && Date.now() - binding.lastSeen < 30000,
+      conflict: binding.conflict,
+    }))
   } }))
   routeDisposers.push(webServer.register({ kind: 'exact', path: '/pen-session-token', handler: async (req, res) => {
     if (!bindingOf(req)) { res.writeHead(401); res.end('invalid canvas binding'); return }
@@ -529,4 +663,5 @@ export function registerCanvasHost({ ctx, sub, mcpBin, headless }) {
     bindingsBySession.clear()
   })
   console.log('[pen-dev-bridge] pen.dev canvas routes ready at /pen-editor (binds workspace on conversation trigger)')
+  return { selectionContext }
 }

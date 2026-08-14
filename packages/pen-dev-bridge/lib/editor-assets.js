@@ -58,18 +58,44 @@ export function createEditorAssets({ bindingOf, urlOf }) {
 var __penBinding = ${bindingKey};
 var __penFile = ${penFile};
 function __penHostUrl(path) { return path + '?binding=' + encodeURIComponent(__penBinding); }
+function __penBytesToBase64(bytes) {
+  var chunks = [];
+  for (var offset = 0; offset < bytes.length; offset += 32768) {
+    chunks.push(String.fromCharCode.apply(null, bytes.subarray(offset, offset + 32768)));
+  }
+  return btoa(chunks.join(''));
+}
+function __penEncodeValue(value) {
+  if (value instanceof ArrayBuffer) return { __penBinaryBase64: __penBytesToBase64(new Uint8Array(value)) };
+  if (ArrayBuffer.isView(value)) return { __penBinaryBase64: __penBytesToBase64(new Uint8Array(value.buffer, value.byteOffset, value.byteLength)) };
+  if (Array.isArray(value)) return value.map(__penEncodeValue);
+  if (value && typeof value === 'object') {
+    var encoded = {};
+    for (var key in value) if (Object.prototype.hasOwnProperty.call(value, key)) encoded[key] = __penEncodeValue(value[key]);
+    return encoded;
+  }
+  return value;
+}
+function __penDecodeValue(value) {
+  if (!value || typeof value !== 'object') return value;
+  if (typeof value.__penBinaryBase64 === 'string') {
+    var raw = atob(value.__penBinaryBase64);
+    var bytes = new Uint8Array(raw.length);
+    for (var i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+    return bytes.buffer;
+  }
+  if (Array.isArray(value)) return value.map(__penDecodeValue);
+  for (var key in value) if (Object.prototype.hasOwnProperty.call(value, key)) value[key] = __penDecodeValue(value[key]);
+  return value;
+}
 function __penDecodeResponse(resp) {
-  var encoded = resp && resp.payload && resp.payload.__penBinaryBase64;
-  if (typeof encoded !== 'string') return resp;
-  var raw = atob(encoded);
-  var bytes = new Uint8Array(raw.length);
-  for (var i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
-  resp.payload = bytes.buffer;
+  if (!resp || typeof resp !== 'object') return resp;
+  resp.payload = __penDecodeValue(resp.payload);
   return resp;
 }
 window.vscodeapi = {
   postMessage: function (msg) {
-    fetch(__penHostUrl('/pen-host/ipc'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(msg) })
+    fetch(__penHostUrl('/pen-host/ipc'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(__penEncodeValue(msg)) })
       .then(function (r) { return r.json() })
       .then(__penDecodeResponse)
       .then(function (resp) { window.postMessage(resp, '*') })

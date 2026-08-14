@@ -214,7 +214,7 @@ export function createHeadlessRuntime({ ctx, sub, penBin, mcpBin, baseEnv, works
       stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n')
     })
     const init = async () => {
-      await call('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'dsh-pen-dev-bridge', version: '0.4.0' } })
+      await call('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'dsh-pen-dev-bridge', version: '0.5.0' } })
       stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n')
       const listed = await call('tools/list', {})
       const tools = listed && listed.result && Array.isArray(listed.result.tools) ? listed.result.tools : []
