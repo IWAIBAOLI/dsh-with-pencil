@@ -243,7 +243,7 @@ export default {
         stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n')
       })
       const init = async () => {
-        await call('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'dsh-pen-dev-bridge', version: '0.3.0' } })
+        await call('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'dsh-pen-dev-bridge', version: '0.3.1' } })
         stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n')
       }
       const close = () => { try { handle.terminate() } catch (err) { /* ignore */ } }

@@ -157,6 +157,9 @@ try {
   if (!client.includes('打开工作区文件夹') || !client.includes('新建 .pen 文件') || client.includes('当前会话 · 右侧分屏 · 自动保存')) {
     fail('canvas toolbar must expose concise workspace/file controls')
   } else ok('canvas toolbar exposes concise workspace/file controls')
+  if (!client.includes('DEFAULT_SPLIT_RATIO = 0.42') || !client.includes('ratio: width / viewport') || !client.includes('setViewportWidth(viewport)') || client.includes('wide: width')) {
+    fail('split canvas width must default smaller and follow viewport ratio')
+  } else ok('split canvas defaults to 42% and follows viewport ratio')
 } catch (err) { fail('browser half: ' + err.message) }
 
 // 4c. The host must not derive a workspace from its launch directory. Both

@@ -55,7 +55,8 @@ html[data-penhost-pointer="drag"], html[data-penhost-pointer="drag"] * { cursor:
 [data-penhost-wide] > div:nth-child(3) { visibility: hidden; }
 `
 
-		const EMPTY_SESSION = Object.freeze({ open: false, mode: 'split', wide: 0, pos: null, binding: null, workspace: null, file: null, loading: false, error: null })
+		const DEFAULT_SPLIT_RATIO = 0.42
+		const EMPTY_SESSION = Object.freeze({ open: false, mode: 'split', ratio: DEFAULT_SPLIT_RATIO, pos: null, binding: null, workspace: null, file: null, loading: false, error: null })
 
 		function insertStyles() {
 			if (typeof document === 'undefined') return () => {}
@@ -181,8 +182,10 @@ html[data-penhost-pointer="drag"], html[data-penhost-pointer="drag"] * { cursor:
 			const [files, setFiles] = React.useState([])
 			const [filesLoading, setFilesLoading] = React.useState(false)
 			const [menuError, setMenuError] = React.useState(null)
-			const clampWide = React.useCallback((value) => Math.min(Math.max(Math.round(value), 400), Math.max(400, window.innerWidth - 560)), [])
-			const effectiveWide = state.wide || clampWide(window.innerWidth * 0.5)
+			const [viewportWidth, setViewportWidth] = React.useState(() => window.innerWidth)
+			const clampWide = React.useCallback((value, viewport) => Math.min(Math.max(Math.round(value), 400), Math.max(400, viewport - 560)), [])
+			const effectiveRatio = state.ratio || DEFAULT_SPLIT_RATIO
+			const effectiveWide = clampWide(viewportWidth * effectiveRatio, viewportWidth)
 
 			const applyGrid = React.useCallback((frame, width) => {
 				try {
@@ -196,17 +199,17 @@ html[data-penhost-pointer="drag"], html[data-penhost-pointer="drag"] * { cursor:
 				if (!active || !state.open || state.mode !== 'split') return
 				const frame = frameOf()
 				if (!frame) return
-				const width = clampWide(state.wide || window.innerWidth * 0.5)
-				if (state.wide !== width) store.patch(sessionId, { wide: width })
-				applyGrid(frame, width)
-				const onResize = () => {
-					const next = clampWide((store.getSnapshot().sessions[sessionId] || EMPTY_SESSION).wide || window.innerWidth * 0.5)
-					store.patch(sessionId, { wide: next })
-					applyGrid(frame, next)
+				const syncWidth = () => {
+					const current = store.getSnapshot().sessions[sessionId] || EMPTY_SESSION
+					const viewport = window.innerWidth
+					const width = clampWide(viewport * (current.ratio || DEFAULT_SPLIT_RATIO), viewport)
+					setViewportWidth(viewport)
+					applyGrid(frame, width)
 				}
-				window.addEventListener('resize', onResize)
+				syncWidth()
+				window.addEventListener('resize', syncWidth)
 				return () => {
-					window.removeEventListener('resize', onResize)
+					window.removeEventListener('resize', syncWidth)
 					if (frame.dataset.penhostWide === sessionId) {
 						delete frame.dataset.penhostWide
 						frame.style.removeProperty('--penhost-grid')
@@ -240,8 +243,9 @@ html[data-penhost-pointer="drag"], html[data-penhost-pointer="drag"] * { cursor:
 				const startX = event.clientX
 				const startWide = effectiveWide
 				const onMove = (moveEvent) => {
-					const width = clampWide(startWide + startX - moveEvent.clientX)
-					store.patch(sessionId, { wide: width })
+					const viewport = window.innerWidth
+					const width = clampWide(startWide + startX - moveEvent.clientX, viewport)
+					store.patch(sessionId, { ratio: width / viewport })
 					if (frame) applyGrid(frame, width)
 				}
 				trackPointer(event, 'resize', resizeRef, onMove)
