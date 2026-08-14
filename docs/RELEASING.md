@@ -35,7 +35,11 @@ these are resolved:
 4. Decide how users obtain the compatible editor bundle. The beta currently
    requires `DSH_PEN_EDITOR_DIR`; an installer may download from an official
    pen.dev URL only after the relevant terms are confirmed.
-5. Enable npm two-factor authentication or trusted publishing and private
+5. Move to an official `@pen.dev/cli` release whose image stack includes a
+   patched Sharp/libvips version, or obtain written vendor guidance for the
+   pinned version. Do not force a transitive Sharp override without rerunning
+   the editor/render/export compatibility suite.
+6. Enable npm two-factor authentication or trusted publishing and private
    vulnerability reporting for the repository.
 
 `npm run release:check` deliberately fails while these machine-checkable gates
