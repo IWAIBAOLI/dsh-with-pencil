@@ -97,9 +97,9 @@ try {
     fail('bundle patch must insert { id: pen-dev-bridge, name: pen-dev-bridge }')
   } else ok('bundle patch inserts pen-dev-bridge row')
   const patch = patchText('bundles/pen-dev-bridge-bundle/cordis.patch.yml')
-  if (!patch.includes("inject: ['tools', 'subprocess', 'sandboxPolicy', 'webServer', 'sessions']") && !patch.includes('inject: ["tools", "subprocess", "sandboxPolicy", "webServer", "sessions"]')) {
-    fail('bundle patch row must inject [tools, subprocess, sandboxPolicy, webServer, sessions]')
-  } else ok('bundle patch row injects [tools, subprocess, sandboxPolicy, webServer, sessions]')
+  if (!patch.includes("inject: ['tools', 'subprocess', 'sandboxPolicy', 'webServer', 'sessions', 'attachments']") && !patch.includes('inject: ["tools", "subprocess", "sandboxPolicy", "webServer", "sessions", "attachments"]')) {
+    fail('bundle patch row must inject [tools, subprocess, sandboxPolicy, webServer, sessions, attachments]')
+  } else ok('bundle patch row injects tool, process, web, session, and attachment services')
 } catch (err) { fail('bundle patch: ' + err.message) }
 try {
   parseYaml('profiles/pen-dev-bridge-template/cordis.yml')
@@ -110,6 +110,8 @@ try {
 // 4. plugin entry syntax
 console.log('[4] plugin entry syntax')
 let pluginSource = ''
+let workspacePathSource = ''
+let headlessSource = ''
 try {
   const pluginPath = path.join(root, 'packages/pen-dev-bridge/lib/index.js')
   execFileSync(process.execPath, ['--check', pluginPath], { stdio: 'pipe' })
@@ -117,6 +119,28 @@ try {
   ok('lib/index.js parses as ESM')
 } catch (err) {
   fail('lib/index.js: ' + (err.stderr ? err.stderr.toString() : err.message))
+}
+try {
+  const workspacePath = path.join(root, 'packages/pen-dev-bridge/lib/workspace-path.js')
+  execFileSync(process.execPath, ['--check', workspacePath], { stdio: 'pipe' })
+  workspacePathSource = fs.readFileSync(workspacePath, 'utf8')
+  ok('lib/workspace-path.js parses as ESM')
+} catch (err) {
+  fail('lib/workspace-path.js: ' + (err.stderr ? err.stderr.toString() : err.message))
+}
+try {
+  const headlessPath = path.join(root, 'packages/pen-dev-bridge/lib/headless-runtime.js')
+  execFileSync(process.execPath, ['--check', headlessPath], { stdio: 'pipe' })
+  headlessSource = fs.readFileSync(headlessPath, 'utf8')
+  ok('lib/headless-runtime.js parses as ESM')
+} catch (err) {
+  fail('lib/headless-runtime.js: ' + (err.stderr ? err.stderr.toString() : err.message))
+}
+try {
+  execFileSync(process.execPath, ['--check', path.join(root, 'packages/pen-dev-bridge/lib/legacy-tools.js')], { stdio: 'pipe' })
+  ok('lib/legacy-tools.js parses as ESM')
+} catch (err) {
+  fail('lib/legacy-tools.js: ' + (err.stderr ? err.stderr.toString() : err.message))
 }
 try {
   execFileSync(process.execPath, ['--check', path.join(root, 'packages/pen-dev-bridge/lib/client.js')], { stdio: 'pipe' })
@@ -195,27 +219,39 @@ if (!pluginSource.includes("const EDITOR_SCHEMA_VERSION = '2.14'") || !pluginSou
 if (!pluginSource.includes('binding.loadedFile !== binding.currentFile') || !pluginSource.includes('(binding.saveRequested || Date.now() >= binding.autosaveAfter)') || !pluginSource.includes('async function saveCanvas(binding)') || !pluginSource.includes('writeFileAtomic')) {
   fail('autosave must wait for a successful file load and write atomically')
 } else ok('autosave waits for a successful file load and writes atomically')
-if (!pluginSource.includes("execute: 'batch-design'") || !pluginSource.includes('return canvasBridge.run(tool') || !pluginSource.includes("Saved by live canvas:") || !pluginSource.includes('function requestCanvas(')) {
+if (!pluginSource.includes("execute: 'batch-design'") || !headlessSource.includes('return canvasBridge.run(tool') || !pluginSource.includes("Saved by live canvas:") || !pluginSource.includes('function requestCanvas(')) {
   fail('open conversation canvases must receive MCP edits through their own editor IPC')
 } else ok('MCP edits route directly through the open conversation canvas')
 if (!pluginSource.includes('function __penPoll()') || !pluginSource.includes('binding.pollWaiters.push(waiter)') || !pluginSource.includes("path: '/pen-host/state'")) {
   fail('live canvas IPC must use low-latency polling and expose synchronized binding state')
 } else ok('live canvas IPC uses low-latency polling with synchronized binding state')
-if (!pluginSource.includes("get_app_state: ['get_app_state', 'get_editor_state']") || !pluginSource.includes("execute: ['execute', 'batch_design']") || !pluginSource.includes("await call('tools/list', {})")) {
+if (!headlessSource.includes("get_app_state: ['get_app_state', 'get_editor_state']") || !headlessSource.includes("execute: ['execute', 'batch_design']") || !headlessSource.includes("await call('tools/list', {})")) {
   fail('MCP calls must map the schema-compatible CLI legacy tool names from tools/list')
 } else ok('MCP calls map legacy tool names discovered through tools/list')
-if (!pluginSource.includes('function cliSocketActive()') || !pluginSource.includes('async function cleanupStaleCliSocket()') || !pluginSource.includes('let mcpSerial = Promise.resolve()') || !pluginSource.includes('await client.close()')) {
+if (!headlessSource.includes('function cliSocketActive()') || !headlessSource.includes('async function cleanupStaleCliSocket()') || !headlessSource.includes('let mcpSerial = Promise.resolve()') || !headlessSource.includes('await client.close()')) {
   fail('headless MCP calls must serialize, retire helpers, and clean only inactive CLI sockets')
 } else ok('headless MCP calls serialize, retire helpers, and clean inactive CLI sockets')
-if (!pluginSource.includes('async function engineCommand(') || !pluginSource.includes("fresh.includes('Saved ' + target)") || !pluginSource.includes('MCP edit succeeded in memory, but disk save failed') || !pluginSource.includes('Saved to disk: ')) {
+if (!headlessSource.includes('async function engineCommand(') || !headlessSource.includes("fresh.includes('Saved ' + target)") || !headlessSource.includes('MCP edit succeeded in memory, but disk save failed') || !headlessSource.includes('Saved to disk: ')) {
   fail('MCP edits must await an acknowledged save and verify the disk document')
 } else ok('MCP edits await an acknowledged save and verify the disk document')
-if (!pluginSource.includes('process.kill(pid, 0)') || !pluginSource.includes('No pen.dev engine is bound to this conversation')) {
-  fail('external editor detection must ignore stale app records and request an explicit open')
-} else ok('stale external editor records are ignored with an explicit open hint')
-if (!pluginSource.includes('path escapes the bound session workspace')) {
+if (headlessSource.includes('process.kill(pid, 0)') || !headlessSource.includes('process.env.DSH_PEN_MCP_APP') || !headlessSource.includes('No pen.dev engine is bound to this conversation')) {
+  fail('external editor routing must be explicit and request an open by default')
+} else ok('external editor routing is opt-in and session-safe by default')
+if (!workspacePathSource.includes('path escapes the bound session workspace') || !workspacePathSource.includes('realpathSync.native') || !pluginSource.includes('resolveWorkspacePath')) {
   fail('canvas file IPC must enforce the bound workspace boundary')
-} else ok('canvas file IPC enforces the bound workspace boundary')
+} else ok('all Pencil paths enforce a symlink-aware workspace boundary')
+if (!pluginSource.includes("res.writeHead(404); res.end('conversation is not available')") || pluginSource.includes('const workspace = liveCwd || requestedCwd')) {
+  fail('canvas bindings must require a live Harness conversation')
+} else ok('canvas bindings require a live Harness conversation')
+if (!pluginSource.includes('cancelled before delivery') || !pluginSource.includes('pending.delivered = true') || !pluginSource.includes('binding.queue.findIndex')) {
+  fail('queued canvas requests must be removable on cancellation')
+} else ok('queued canvas requests are removed on cancellation')
+if (!pluginSource.includes('fs.chmodSync(stateFile, 0o600)') || !pluginSource.includes('mode: 0o600')) {
+  fail('persisted browser credentials must use owner-only permissions')
+} else ok('persisted browser credentials use owner-only permissions')
+if (!pluginSource.includes("attachments.saveImage") || !pluginSource.includes("blocks.push({ type: 'image', attachment: value.image })")) {
+  fail('Pencil screenshots must return a real model-visible image block')
+} else ok('Pencil screenshots return a model-visible image block')
 
 // 5. profile template composition
 console.log('[5] profile template')

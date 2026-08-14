@@ -395,6 +395,11 @@ html[data-penhost-pointer="drag"], html[data-penhost-pointer="drag"] * { cursor:
 			React.useEffect(() => {
 				for (const sessionId of Object.keys(snapshot.sessions)) {
 					if (!known[sessionId] || (known[sessionId].blank === true && sessionId !== current)) {
+						const binding = snapshot.sessions[sessionId] && snapshot.sessions[sessionId].binding
+						if (binding) {
+							void fetch('/pen-host/unbind?binding=' + encodeURIComponent(binding), { method: 'POST', keepalive: true })
+								.catch(() => undefined)
+						}
 						props.store.remove(sessionId)
 					}
 				}

@@ -1,132 +1,120 @@
-# pen-dev-bridge — pen.dev (pencil.dev) 桥接 Bundle
+# pen-dev-bridge
 
-把官方 pen.dev（pencil.dev）的设计能力接入 DeepSeek Harness。**DeepSeek 就是设计 agent**：
-插件优先把工具调用直连到当前会话已打开的 pen.dev 浏览器画布，未打开画布时才在 Host 半
-自持本地 headless 编辑器引擎（来自 `@pen.dev/cli`），并注册
-12 个 `pencil_*` 动态模型工具 —— 官方 Pencil MCP 工具（`get_app_state` / `execute` /
-`export_html` / `export_nodes` / `get_screenshot` / `get_guidelines`）+ 一键 `pen` CLI 助手
-（`status` / `login` / `workspaces` / `design` / `export`）。
+把官方 pen.dev（Pencil）的编辑能力接入 DeepSeek Harness。DeepSeek 仍然是设计 Agent；
+Bridge 只负责把模型工具、当前会话和用户看到的 Pencil 画布连接起来。
 
-这是会话内动态插件 `pencil-6` 与 `penin-1` 的**可安装持久化形态**：重启不丢，任何 profile 可装。
+默认注册 7 个核心工具：`pencil_mcp_open`、`get_app_state`、`execute`、
+`get_guidelines`、`get_screenshot`、`export_html` 和 `export_nodes`。旧的一次性 CLI 助手
+默认不再暴露给模型，避免重复能力和无关上下文；确有兼容需求时可设置
+`DSH_PEN_LEGACY_TOOLS=1`，恢复 `status`、`login`、`workspaces`、`design`、`export` 5 个工具。
 
-插件带 **Browser 半（Client）**：用户在会话内主动触发后，才把该会话及其工作区绑定到
-pen.dev 画布。画布可使用右侧 42% 响应式分屏（左缘拖动调宽）或浮动窗口，由 Host 半的
-`/pen-editor` 静态路由与 `/pen-host` IPC 桥驱动，6 秒自动保存回该会话工作区的 `.pen`
-文件。切换会话时隐藏，返回时恢复；各会话分别保存打开状态、模式、宽度和浮动位置。
+## 组成与边界
+
+这不是 Pencil 的重写版，也没有替换官方引擎：
+
+- `@pen.dev/cli@0.3.0` 是官方包，提供 headless 引擎和 MCP server。
+- editor `0.1.94` 是官方浏览器编辑器 bundle，负责画布渲染和交互。
+- 本仓库的 Bridge 是自定义对接层，负责 Harness 工具注册、会话/工作区绑定、Browser UI、
+  editor IPC、保存确认和截图附件。
+- 当前实现不依赖 Antigravity/Pencil Desktop 扩展外壳；只有显式设置
+  `DSH_PEN_MCP_APP` 时才连接外部 Pencil app。
+
+`.pen` schema 被固定为 `2.14`。升级 CLI 或 editor 前必须先验证两边 schema 和 IPC 兼容，
+否则可能出现文件打不开或保存覆盖。
+
+## 工作方式
+
+- Harness 启动时不选择工作区，也不默认打开画布。
+- 用户在会话内点击“pen.dev 画布”后，Host 根据 Harness 的真实 session 绑定该会话工作区；
+  浏览器提交的任意路径不能替代 session 工作区。
+- 切换到其他会话时画布隐藏；返回原会话后恢复。会话被移除时会先保存再解绑。
+- 画布打开时，MCP 编辑直接进入该会话的可见 editor IPC，修改实时渲染，并在工具返回成功前
+  等待 `save-resource` 落盘、重新解析磁盘 JSON。
+- 画布未打开时，Bridge 才启动官方 headless 引擎。现有文件使用
+  `interactive --in <file> --out <file>`，每次编辑后发送 `save()`，只有收到保存回执并验证
+  磁盘文档后才返回成功。
+- 官方 CLI 共用全局 `pencil-cli.sock`；所有 headless 操作与引擎交接串行执行。不同会话的
+  live canvas 各自排队，不需要互相阻塞。
+
+模型输入、浏览器 IPC、导入和导出路径都被限制在所属会话工作区内，并检查符号链接逃逸。
+浏览器登录态使用原子替换写入且权限为 `0600`。
 
 ## 目录结构
 
 ```text
-pen-dev-bridge/
-├── packages/
-│   └── pen-dev-bridge/              # 真实 Node Host 插件（ESM，导出 Cordis 插件）
-│       ├── package.json             #   dependencies: @pen.dev/cli；dsh.client: web
-│       ├── lib/index.js             #   引擎生命周期 + 12 个工具注册 + 画布 UI Host 路由
-│       └── lib/client.js            #   Browser 半：分屏/浮动画布面板（__ModuleLoader__ wrap）
-├── bundles/
-│   └── pen-dev-bridge-bundle/       # Bundle：dsh.bundle.patch → cordis.patch.yml
-│       ├── package.json
-│       └── cordis.patch.yml         #   insert: - id: pen-dev-bridge / name: 'pen-dev-bridge'
-├── profiles/
-│   └── pen-dev-bridge-template/     # 示例 Profile：dsh-base + dsh-web-app + bridge
-└── scripts/
-    └── verify.cjs                   # 静态验证（无需运行 DSH）
+packages/pen-dev-bridge/
+  lib/index.js              工具注册和 Canvas Host
+  lib/headless-runtime.js   官方 CLI/MCP 引擎生命周期
+  lib/workspace-path.js     session 工作区与路径边界
+  lib/legacy-tools.js       可选的一次性 CLI 工具
+  lib/client.js             Harness Browser 分屏/浮动画布
+bundles/pen-dev-bridge-bundle/
+  cordis.patch.yml          Host 服务注入
+profiles/pen-dev-bridge-template/
+  package.json              开发用示例 profile
+tests/
+  live-canvas.test.mjs      真实协议形状的 Agent/Canvas 模拟
+  workspace-path.test.mjs   路径与符号链接边界
+scripts/verify.cjs          包结构和关键约束检查
 ```
 
-## 安装
+## 当前安装方式
 
-### 方式 A：作为独立 Profile
+目前是测试版开发安装，还不是可发布的一键插件：三个 package 都是 `private`，Bundle 与示例
+profile 使用仓库内的相对 `file:` 依赖；把 profile 目录单独复制出去会破坏这些路径。
+
+在本仓库测试时，先准备官方 editor bundle：
+
+1. 从 pen.dev 官方版本接口取得 `editor-bundle-v0.1.94.zip` 并解压。
+2. 将 `DSH_PEN_EDITOR_DIR` 指向解压目录中的 `out`（该目录内应有 `index.html`）。
+3. 在目标 DSH profile 中以绝对 `file:` 路径安装本仓库的
+   `bundles/pen-dev-bridge-bundle`，并把 `pen-dev-bridge-bundle` 加入
+   `dsh.profile.bundles`。
+4. 重新安装 profile 依赖并重启 DSH。Bundle 会继续拉入本仓库 Bridge，Bridge 再安装固定版本
+   的官方 `@pen.dev/cli`。
+
+也可以直接在仓库内安装示例 profile 的依赖进行开发验证，但不要把下面命令理解为发行安装器：
 
 ```bash
-cp -R pen-dev-bridge/profiles/pen-dev-bridge-template "$DSH_HOME/profiles/pen-dev-bridge"
-cd "$DSH_HOME/profiles/pen-dev-bridge"
-pnpm install        # 会拉入 @pen.dev/cli（约 700MB，含 headless 引擎与 MCP server）
-dsh --profile pen-dev-bridge
+cd profiles/pen-dev-bridge-template
+pnpm install
 ```
 
-独立 Profile 同时包含 `@deepseek-ai/dsh-web-app`，因为 bridge 的 Browser 半和
-`/pen-editor`、`/pen-host` 路由需要 `webServer` 服务。
-
-### 方式 B：挂到现有 profile
-
-在 profile 的 `package.json` 的 `dsh.profile.bundles` 追加 `"pen-dev-bridge-bundle"`，
-并在 `dependencies` 声明 `"pen-dev-bridge-bundle": "file:<本目录>/bundles/pen-dev-bridge-bundle"`，
-重新 `pnpm install` 后重启 DSH。
-
-## 使用前
-
-1. **登录 pen.dev**：让 agent 调用 `pencil_login`（邮箱 OTP 流程），或在终端 `pen login`；
-   登录态存于 `~/.pencil/session-cli.json`（子进程自动读取）。也可设 `PEN_CLI_KEY`。
-2. **开始设计**：对 agent 说“用 pen.dev 设计一个登录页”，agent 会走
-   `pencil_mcp_open` → `get_app_state`（学 schema）→ `execute`（建节点）→
-   `get_screenshot`（验证）→ `export_html` / `export_nodes`（落地代码/图片）。
-
-插件将 `@pen.dev/cli` 精确锁定在 `0.3.0`：它与官方公开的 editor `0.1.94` 都使用 `.pen`
-schema `2.14`。升级任一侧前必须先确认两者 schema 一致，否则新文件只能被其中一侧打开。
-Bridge 会读取 MCP `tools/list`，把现行 `get_app_state` / `execute` 自动映射到 0.3.0 的
-`get_editor_state` / `batch_design`，上层 `pencil_mcp_*` 工具名保持不变。
-
-## 引擎坐席
-
-- **画布已打开**：Bridge 按官方 App Mode 的结构，把 `pencil_mcp_*` 直接转成当前会话
-  Webview 的 `get-editor-state` / `batch-design` 等 IPC 请求；Agent 与用户看到的是同一个
-  文档模型，修改立即渲染。Host 使用低延迟长轮询承载双向 IPC，并在每次编辑后等待
-  `save-resource` 落盘再返回成功。文件导出工具会先 flush 活画布，再使用只读 headless 回退。
-- **画布未打开**：插件自持 headless 引擎（`pen interactive --out <file>`，stdin 保持打开）。
-  每次 `execute` / `batch_design` 成功后会立即发送 `save()`，只有收到精确的 `Saved <path>`
-  回执并重新读取到合法磁盘 JSON 后，工具才返回成功；失败时保留 dirty 状态并阻止静默切换文件。
-- 官方 CLI 固定使用全局 `pencil-cli.sock`，因此 Bridge 会串行执行 MCP 调用，并在会话文件间
-  安全切换唯一的活动引擎；启动前只会删除确认无人监听的残留 socket。
-- 备选：检测到运行中的 **Pencil Desktop / IDE（Antigravity 等）** 时自动连 `--app <name>`
-  （同时校验 `~/.pencil/apps` 中的 PID 与 socket，忽略残留记录），可用 `DSH_PEN_MCP_APP` 覆盖。
+后续正式安装器应完成四件事：安装 Bridge/Bundle、安装固定版本官方 CLI、从官方地址下载并
+校验 editor bundle、修改目标 profile 配置。editor bundle 是否可随插件再分发，需要先确认
+pen.dev 的授权，因此目前不会把官方 dist 直接提交进本仓库。
 
 ## 环境变量
 
 | 变量 | 说明 |
 |---|---|
-| `DSH_PEN_CLI_BIN` / `DSH_PEN_MCP_BIN` | 覆盖 pen CLI / MCP server 二进制路径（默认从 `@pen.dev/cli` 解析） |
-| `DSH_PEN_MCP_APP` | 外部引擎 app 名（默认自动检测，兜底 `desktop`） |
-| `PEN_CLI_KEY` / `PENCIL_CLI_KEY` | pen.dev 组织级 CLI key（优先于会话登录） |
-| `DSH_PEN_EDITOR_DIR` | 浏览器画布编辑器 dist 目录；它与会话工作区无关（开发树会尝试使用同级 `pen-editor/out`） |
-| `DSH_PEN_FILE` | 每个会话画布的初始 `.pen` 文件（相对路径按对应会话工作区解析，默认 `designs/design.pen`） |
-| `DSH_PEN_STATE_FILE` | pen.dev 浏览器登录态文件（默认 `~/.dsh/pen-dev-bridge/state.json`，不写入项目工作区） |
+| `DSH_PEN_EDITOR_DIR` | 官方 editor 的 `out` 目录；与会话工作区无关 |
+| `DSH_PEN_FILE` | 会话首次打开的 `.pen` 相对路径，默认 `designs/design.pen` |
+| `DSH_PEN_CLI_BIN` / `DSH_PEN_MCP_BIN` | 覆盖官方 CLI/MCP 路径；通常无需设置 |
+| `DSH_PEN_MCP_APP` | 显式连接外部 Pencil app；默认不自动探测 |
+| `DSH_PEN_LEGACY_TOOLS` | 设为 `1` 时注册 5 个旧 CLI 助手 |
+| `PEN_CLI_KEY` / `PENCIL_CLI_KEY` | pen.dev 组织 CLI key |
+| `DSH_PEN_STATE_FILE` | Browser 登录态文件，默认 `~/.dsh/pen-dev-bridge/state.json` |
 
-## 画布（Browser 半）
+## 画布行为
 
-- 启动时不选择工作区、也不自动打开画布。点击会话头部按钮后才绑定该会话工作区；
-  切换会话时隐藏，返回原会话时恢复。
-- 尚未发送消息的新会话没有会话头，此时从输入框右侧的 ✏ 按钮手动打开。
-- 首次打开默认采用 42% 右侧分屏，拖动左缘手柄可调宽（400px 起）；拖动后的宽度按
-  视口比例保存，浏览器变宽或变窄时会同步缩放。
-- 顶部工具栏只保留当前会话工作区、当前 `.pen` 文件、布局和关闭操作；工作区菜单可在
-  系统文件管理器中打开目录，文件菜单只列出当前工作区内的 `.pen` 文件并支持新建、切换。
-- 标题栏可切换 **浮动窗口**（按住标题拖动），✕ 关闭后可从会话头部
-  「✏ pen.dev 画布」按钮重新打开。
-- MCP 修改直接作用于当前会话的可见画布，并与用户的缩放、选择和编辑状态共享同一个引擎；
-  每 6 秒宿主也会为用户手工编辑推 `save-document`，编辑器回 `save-resource` 内容落盘到
-  当前 `.pen` 文件；会话 token 读 `~/.pencil/session-cli.json`，浏览器登录态存于
-  `~/.dsh/pen-dev-bridge/state.json` 并由同一 profile 的所有会话共享，不会污染项目工作区。
-- 编辑器初始化后，宿主会主动推送当前文件的 `file-update`；`.pen` 内容通过二进制 IPC 读取；
-  推送前会校验文件版本与内置编辑器一致，自动保存只有在当前文件成功通过校验（或确认是新文件）后才
-  启用；切换文件时会丢弃旧保存队列并设置冷却闸门，落盘使用同目录临时文件原子替换，避免旧画布、
-  空白编辑器或中断写入覆盖已有设计。
-- 分屏打开期间产品「详情」列被隐藏（`visibility: hidden`），不会叠在画布下面。
+- 首次打开为 42% 右侧分屏；左边缘拖动后按视口比例保存，也可切成浮动窗口。
+- 顶栏仅显示工作区、`.pen` 文件、布局和关闭操作；菜单可打开系统文件夹、新建或切换工作区内
+  的 `.pen` 文件。
+- editor iframe 在当前会话中保持挂载，Agent 切换文件时不会因 React 重建 iframe 而丢引擎。
+- 用户手工编辑每 6 秒触发保存；Agent 编辑则逐次等待保存确认。
+- 截图会保存为 Harness attachment，并向模型返回真正的 image block，而不是 base64 文本提示。
+- 工具取消后，尚未交付 editor 的请求会从队列删除；已经交付的请求会明确提示先检查画布状态，
+  避免盲目重试造成重复编辑。
 
 ## 验证
 
 ```bash
-node pen-dev-bridge/scripts/verify.cjs
+node scripts/verify.cjs
+node tests/workspace-path.test.mjs
+node tests/live-canvas.test.mjs
 ```
 
-该检查同时约束 Harness `defineTool` 的参数格式：最外层直接写属性映射，必填项在对应
-属性上声明 `required: true`，不能传入带 `type` / `properties` / `required: []` 的完整
-JSON Schema 根对象。
-
-## 后续（未包含在本 Bundle）
-
-- 画布编辑器 dist（`pen-editor/out`）不在 Bundle 内：首次使用前需从
-  `api.pen.dev/public/versions` 下载 `editor-bundle-v0.1.94.zip`，并通过
-  `DSH_PEN_EDITOR_DIR` 指向解压后的 `pen-editor/out`。
-- 编辑器与宿主之间的私有 IPC 协议（`get-session` / `save-document` / `save-resource` 等）
-  随 pen.dev 官方 webview 版本演进，升级 dist 时需同步核对 `lib/index.js` 的
-  `handleIpc` 分支。
+`live-canvas.test.mjs` 模拟真实 Agent 工具调用和官方 editor IPC：连续编辑三个区块、保存到磁盘、
+切换并重开文件、返回截图附件、取消排队请求、解绑会话，并确认整个 live canvas 路径没有启动
+headless 子进程。

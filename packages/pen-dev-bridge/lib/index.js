@@ -14,10 +14,12 @@ import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import net from 'node:net'
 import { randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { defineTool } from '@deepseek-ai/dsh-tools'
+import { createHeadlessRuntime } from './headless-runtime.js'
+import { registerLegacyTools } from './legacy-tools.js'
+import { resolveWorkspacePath, workspaceForExec as resolveExecWorkspace } from './workspace-path.js'
 
 const require = createRequire(import.meta.url)
 
@@ -42,24 +44,12 @@ function textBlock(text) {
   return [{ type: 'text', text: String(text) }]
 }
 
-function withSignal(promise, signal) {
-  if (!signal) return promise
-  if (signal.aborted) return Promise.reject(new Error('pencil call aborted'))
-  return new Promise((resolve, reject) => {
-    const onAbort = () => reject(new Error(signal.reason ? String(signal.reason) : 'pencil call aborted/timed out'))
-    signal.addEventListener('abort', onAbort, { once: true })
-    promise.then(
-      (v) => { signal.removeEventListener('abort', onAbort); resolve(v) },
-      (e) => { signal.removeEventListener('abort', onAbort); reject(e) },
-    )
-  })
-}
-
 export default {
   name: 'pen-dev-bridge',
   apply(ctx) {
     const sub = ctx.get('subprocess')
     const policy = ctx.get('sandboxPolicy')
+    const attachments = ctx.get('attachments')
     if (sub === undefined) {
       console.warn('[pen-dev-bridge] subprocess service unavailable; bridge disabled')
       return
@@ -72,393 +62,33 @@ export default {
     // Workspaces belong to sessions, not to plugin startup. Resolve the path
     // boundary only when a tool call is actually made.
     function workspaceForExec(exec) {
-      const session = exec && exec.agent && exec.agent.session
-      const scoped = policy && typeof policy.resolve === 'function'
-        ? policy.resolve(session ? { session } : {})
-        : undefined
-      const cwd = (scoped && scoped.workspaceRoot) || (session && session.header && session.header.cwd)
-      if (!cwd) throw new Error('pen.dev requires a workspace-backed conversation')
-      return path.resolve(String(cwd))
-    }
-    function absPath(p, workspace) {
-      const s = String(p || '')
-      return path.isAbsolute(s) ? s : path.join(workspace, s)
+      return resolveExecWorkspace(policy, exec)
     }
 
-    // Keep each conversation's selected file, but allow only one active
-    // headless process: the official CLI hardcodes the global `cli` socket.
-    // MCP calls are serialized and switch that process between session files.
-    const engines = new Map()
-    const cliSocket = path.join(os.homedir(), '.pencil', 'socket', 'pencil-cli.sock')
-    let activeEngine = null
-    let mcpSerial = Promise.resolve()
-    let canvasBridge = null
-    function engineFor(exec) {
-      const workspace = workspaceForExec(exec)
-      const key = String(exec && exec.agent && exec.agent.session && exec.agent.session.id || workspace)
-      let engine = engines.get(key)
-      if (!engine) {
-        engine = { key, workspace, handle: null, file: null, ready: Promise.resolve(), output: '', outputWaiters: [], dirty: false }
-        engines.set(key, engine)
-      }
-      return engine
-    }
-    function appendEngineOutput(engine, chunk) {
-      engine.output += chunk.toString()
-      for (const waiter of engine.outputWaiters.slice()) {
-        const fresh = engine.output.slice(waiter.start)
-        if (!waiter.test(fresh)) continue
-        clearTimeout(waiter.timer)
-        engine.outputWaiters.splice(engine.outputWaiters.indexOf(waiter), 1)
-        waiter.resolve(fresh)
-      }
-    }
-    function waitForEngineOutput(engine, test, timeoutMs, start) {
-      return new Promise((resolve, reject) => {
-        const waiter = { start: start === undefined ? engine.output.length : start, test, resolve, reject, timer: null }
-        waiter.timer = setTimeout(() => {
-          const index = engine.outputWaiters.indexOf(waiter)
-          if (index !== -1) engine.outputWaiters.splice(index, 1)
-          reject(new Error('pen.dev engine command timed out after ' + timeoutMs + 'ms'))
-        }, timeoutMs)
-        engine.outputWaiters.push(waiter)
-        const fresh = engine.output.slice(waiter.start)
-        if (test(fresh)) {
-          clearTimeout(waiter.timer)
-          engine.outputWaiters.splice(engine.outputWaiters.indexOf(waiter), 1)
-          resolve(fresh)
-        }
-      })
-    }
-    function rejectEngineWaiters(engine, error) {
-      for (const waiter of engine.outputWaiters.splice(0)) {
-        clearTimeout(waiter.timer)
-        waiter.reject(error)
-      }
-    }
-    async function engineCommand(engine, command, test, timeoutMs) {
-      if (!engine.handle || !engine.handle.stdin) throw new Error('pen.dev engine is not running')
-      const awaited = waitForEngineOutput(engine, test, timeoutMs)
-      try { engine.handle.stdin.write(command + '\n') }
-      catch (err) {
-        rejectEngineWaiters(engine, err)
-        throw err
-      }
-      return awaited
-    }
-    function cliSocketActive() {
-      if (!fs.existsSync(cliSocket)) return Promise.resolve(false)
-      return new Promise((resolve) => {
-        const socket = net.createConnection(cliSocket)
-        let settled = false
-        const finish = (active) => {
-          if (settled) return
-          settled = true
-          try { socket.destroy() } catch (err) { /* ignore */ }
-          resolve(active)
-        }
-        socket.once('connect', () => finish(true))
-        socket.once('error', () => finish(false))
-        socket.setTimeout(400, () => finish(false))
-      })
-    }
-    async function cleanupStaleCliSocket() {
-      if (!fs.existsSync(cliSocket) || await cliSocketActive()) return false
-      try { await fsp.unlink(cliSocket); return true }
-      catch (err) { return false }
-    }
-    async function stopEngine(engine, flush = true) {
-      const handle = engine && engine.handle
-      if (!handle) return
-      if (flush && engine.dirty) {
-        await saveEngine(engine)
-        engine.dirty = false
-      }
-      engine.handle = null
-      engine.file = null
-      engine.dirty = false
-      if (activeEngine === engine) activeEngine = null
-      try { handle.terminate() } catch (err) { /* ignore */ }
-      try {
-        await Promise.race([
-          handle.done.catch(() => undefined),
-          new Promise((resolve) => setTimeout(resolve, 2500)),
-        ])
-      } catch (err) { /* ignore */ }
-      await cleanupStaleCliSocket()
-    }
-    async function ensureEngine(filePath, exec) {
-      const engine = engineFor(exec)
-      const target = absPath(filePath, engine.workspace)
-      if (engine.handle && engine.file === target) return engine.ready
-      if (activeEngine && activeEngine !== engine) await stopEngine(activeEngine)
-      await stopEngine(engine)
-      await cleanupStaleCliSocket()
-      if (await cliSocketActive()) {
-        throw new Error('another pen.dev CLI engine is already using ' + cliSocket)
-      }
-      engine.file = target
-      engine.output = ''
-      engine.outputWaiters = []
-      engine.dirty = false
-      // `--out` starts from an EMPTY canvas and never loads existing content;
-      // on an existing file use `--in target --out target` so prior saves load.
-      const argv = fs.existsSync(target)
-        ? [penBin, 'interactive', '--in', target, '--out', target]
-        : [penBin, 'interactive', '--out', target]
-      const handle = sub.spawn({
-        argv,
-        cwd: engine.workspace,
-        // Engine readiness logs land on STDOUT ("Ready."), not stderr.
-        stdio: { stdin: 'pipe', stdout: 'pipe', stderr: 'ignore' },
-        graceMs: 2000,
-        signal: exec.signal,
-        env: baseEnv,
-      })
-      engine.handle = handle
-      activeEngine = engine
-      if (handle.stdout) handle.stdout.on('data', (chunk) => appendEngineOutput(engine, chunk))
-      engine.ready = waitForEngineOutput(engine, (fresh) => fresh.includes('[INFO] Ready.'), 20000, 0)
-        .catch(async (err) => { await stopEngine(engine, false); throw err })
-      handle.done.then(
-        () => {
-          rejectEngineWaiters(engine, new Error('pen.dev engine exited'))
-          if (engine.handle === handle) { engine.handle = null; engine.file = null }
-          if (activeEngine === engine) activeEngine = null
-          void cleanupStaleCliSocket()
-        },
-        () => {
-          rejectEngineWaiters(engine, new Error('pen.dev engine exited'))
-          if (engine.handle === handle) { engine.handle = null; engine.file = null }
-          if (activeEngine === engine) activeEngine = null
-          void cleanupStaleCliSocket()
-        },
-      )
-      return engine.ready
-    }
-    async function saveEngine(engine) {
-      const target = engine && engine.file
-      if (!target) throw new Error('pen.dev engine has no active file')
-      await engineCommand(engine, 'save()', (fresh) => fresh.includes('Saved ' + target), 15000)
-      const content = await fsp.readFile(target, 'utf8')
-      const document = JSON.parse(content)
-      if (!document || !Array.isArray(document.children)) throw new Error('saved .pen file is not a valid document')
-      return { bytes: Buffer.byteLength(content), children: document.children.length }
-    }
-    ctx.effect(() => () => {
-      for (const engine of engines.values()) void stopEngine(engine)
-      engines.clear()
-    })
-
-    // ---- detect an external pen.dev editor app name (desktop / IDE) ----
-    function detectApp(engine) {
-      if (engine && engine.handle && activeEngine === engine) return 'cli'
-      if (process.env.DSH_PEN_MCP_APP) return process.env.DSH_PEN_MCP_APP
-      try {
-        const dir = path.join(os.homedir(), '.pencil', 'apps')
-        const entries = fs.readdirSync(dir).filter((n) => n !== '.DS_Store')
-        for (const entry of entries) {
-          const pid = Number(fs.readFileSync(path.join(dir, entry), 'utf8').trim())
-          if (!Number.isInteger(pid) || pid <= 0) continue
-          try { process.kill(pid, 0) } catch (err) { continue }
-          if (fs.existsSync(path.join(os.homedir(), '.pencil', 'socket', 'pencil-' + entry + '.sock'))) return entry
-        }
-      } catch (err) { /* no live external editor */ }
-      return null
-    }
-
-    // ---- run the official pen CLI once ----
-    async function runCli(args, opts) {
-      const workspace = workspaceForExec(opts.exec)
-      let argv = [penBin].concat(args)
-      let executable = null
-      try { fs.accessSync(penBin, fs.constants.X_OK) } catch (err) { executable = process.execPath; argv = [penBin].concat(args) }
-      const handle = sub.spawn({
-        argv: executable ? [executable, ...argv] : argv,
-        cwd: workspace,
-        stdio: {
-          stdin: 'ignore',
-          stdout: { maxBytes: 400000, spill: { maxBytes: 2000000 } },
-          stderr: { maxBytes: 200000, spill: { maxBytes: 1000000 } },
-        },
-        graceMs: 2000,
-        signal: opts.signal,
-        env: baseEnv,
-      })
-      const outcome = await handle.done
-      const readAll = (r) => { try { return r ? r.readFrom(0).text : '' } catch (err) { return '' } }
-      return {
-        exitCode: outcome.exitCode,
-        stdout: readAll(handle.collected.stdout),
-        stderr: readAll(handle.collected.stderr),
-        aborted: !!(opts.signal && opts.signal.aborted),
-      }
-    }
-
-    // ---- stdio MCP client for the bundled Pencil MCP server ----
-    function mcpClient(appName, workspace) {
-      const handle = sub.spawn({
-        argv: [mcpBin, '--app', appName],
-        cwd: workspace,
-        stdio: { stdin: 'pipe', stdout: 'pipe', stderr: { maxBytes: 200000 } },
-        graceMs: 2000,
-        env: baseEnv,
-      })
-      const stdin = handle.stdin
-      const stdout = handle.stdout
-      let buf = ''
-      const pending = new Map()
-      let nextId = 1
-      stdout.on('data', (chunk) => {
-        buf += chunk.toString()
-        let idx
-        while ((idx = buf.indexOf('\n')) !== -1) {
-          const line = buf.slice(0, idx)
-          buf = buf.slice(idx + 1)
-          if (!line.trim()) continue
-          let msg
-          try { msg = JSON.parse(line) } catch (err) { continue }
-          if (msg && msg.id !== undefined && pending.has(msg.id)) {
-            const resolve = pending.get(msg.id)
-            pending.delete(msg.id)
-            resolve(msg)
-          }
-        }
-      })
-      const call = (method, params) => new Promise((resolve) => {
-        const id = nextId++
-        pending.set(id, resolve)
-        stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n')
-      })
-      const init = async () => {
-        await call('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'dsh-pen-dev-bridge', version: '0.3.5' } })
-        stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n')
-        const listed = await call('tools/list', {})
-        const tools = listed && listed.result && Array.isArray(listed.result.tools) ? listed.result.tools : []
-        return new Map(tools.map((tool) => [tool.name, tool]))
-      }
-      const close = async () => {
-        try { handle.terminate() } catch (err) { /* ignore */ }
-        try {
-          await Promise.race([
-            handle.done.catch(() => undefined),
-            new Promise((resolve) => setTimeout(resolve, 2000)),
-          ])
-        } catch (err) { /* ignore */ }
-      }
-      return { call, init, close, done: handle.done }
-    }
-
-    const mcpAliases = {
-      get_app_state: ['get_app_state', 'get_editor_state'],
-      execute: ['execute', 'batch_design'],
-    }
-    function adaptMcpArguments(requested, actual, args, spec, fileArg) {
-      if (actual === 'get_editor_state') return { include_schema: !!args.include_schema }
-      if (actual === 'batch_design') {
-        if (!args.input) throw new Error('CLI 0.3.0 batch_design requires input; editId patch retries are unavailable')
-        return { filePath: fileArg || args.filePath, input: args.input }
-      }
-      const adapted = { ...args }
-      const requiredFields = spec && spec.inputSchema && Array.isArray(spec.inputSchema.required) ? spec.inputSchema.required : Array()
-      if (fileArg && requiredFields.includes('filePath') && !adapted.filePath) adapted.filePath = fileArg
-      return adapted
-    }
-    async function runMcpNow(tool, args, opts) {
-      const workspace = workspaceForExec(opts.exec)
-      const engine = engineFor(opts.exec)
-      const fileArg = (opts && opts.filePath) || (args && args.filePath)
-
-      // Official pen.dev App Mode forwards MCP operations to the editor
-      // webview's IPC server. Prefer the same single-engine route whenever
-      // this conversation has an initialized canvas; headless remains the
-      // fallback for conversations whose canvas was never opened.
-      if (canvasBridge && canvasBridge.has(opts.exec)) {
-        if (canvasBridge.supports(tool)) {
-          if (engine.handle) await stopEngine(engine)
-          return canvasBridge.run(tool, args || {}, opts, fileArg)
-        }
-        // Some legacy editor bundles do not expose file-export handlers to
-        // their webview IPC. Flush the live document first, then let the
-        // read-only headless fallback export that exact disk snapshot.
-        const flushed = await canvasBridge.flush(opts, fileArg)
-        if (!flushed.ok) return flushed
-      }
-
-      let appName = detectApp(engine)
-      // Engine file may differ from the MCP argument filePath (get_screenshot
-      // must not receive filePath, but still needs the engine on that file).
-      if (fileArg) {
-        try {
-          await ensureEngine(fileArg, opts.exec)
-          appName = 'cli'
-        } catch (err) {
-          return { ok: false, text: 'engine start failed: ' + (err && err.message ? err.message : String(err)) }
-        }
-      }
-      if (!appName) {
-        return { ok: false, text: 'No pen.dev engine is bound to this conversation. Call pencil_mcp_open with the target .pen file first.' }
-      }
-      const client = mcpClient(appName, workspace)
-      try {
-        const catalog = await withSignal(client.init(), opts.signal)
-        const candidates = mcpAliases[tool] || [tool]
-        const actualTool = candidates.find((name) => catalog.has(name))
-        if (!actualTool) {
-          return { ok: false, text: 'MCP tool unavailable: ' + tool + ' (server exposes: ' + Array.from(catalog.keys()).join(', ') + ')' }
-        }
-        const toolArgs = adaptMcpArguments(tool, actualTool, args || {}, catalog.get(actualTool), fileArg)
-        const raced = Promise.race([
-          client.call('tools/call', { name: actualTool, arguments: toolArgs }),
-          client.done.then(() => { throw new Error('pencil MCP server exited before responding (is the pen.dev editor app running?)') }),
-        ])
-        const res = await withSignal(raced, opts.signal)
-        if (res && res.error) {
-          return { ok: false, text: 'MCP error: ' + String((res.error.message || JSON.stringify(res.error))).slice(0, 4000) }
-        }
-        const content = res && res.result && res.result.content
-        let text = Array.isArray(content)
-          ? content.map((c) => {
-              if (c && c.text != null) return c.text
-              if (c && c.type === 'image' && c.data) {
-                return '[screenshot: ' + Math.round(String(c.data).length * 0.75 / 1024) + ' KB PNG (base64)]'
-              }
-              return ''
-            }).join('\n')
-          : JSON.stringify(res && res.result)
-        if (!(res && res.result && res.result.isError) && (tool === 'execute' || actualTool === 'batch_design')) {
-          engine.dirty = true
-          try {
-            const persisted = await saveEngine(engine)
-            engine.dirty = false
-            text += '\nSaved to disk: ' + engine.file + ' (' + persisted.bytes + ' bytes, ' + persisted.children + ' top-level nodes).'
-          } catch (err) {
-            return { ok: false, text: text.slice(0, 6000) + '\n\nMCP edit succeeded in memory, but disk save failed: ' + (err && err.message ? err.message : String(err)) }
-          }
-        }
-        return { ok: !(res && res.result && res.result.isError), text: text.slice(0, 8000) }
-      } catch (err) {
-        return { ok: false, text: 'MCP call failed: ' + (err && err.message ? err.message : String(err)) }
-      } finally {
-        // The official MCP helper and the headless editor share a global
-        // Pencil socket. Do not let a retiring helper overlap the next tool
-        // call or reconnect to a newly switched engine.
-        await client.close()
-      }
-    }
-    function runMcp(tool, args, opts) {
-      const operation = mcpSerial.then(
-        () => runMcpNow(tool, args, opts),
-        () => runMcpNow(tool, args, opts),
-      )
-      mcpSerial = operation.then(() => undefined, () => undefined)
-      return operation
-    }
+    const headless = createHeadlessRuntime({ ctx, sub, penBin, mcpBin, baseEnv, workspaceForExec })
+    const { runCli, runMcp } = headless
 
     // ---- tool definitions ----
     const output = {
       schema: { type: 'object', additionalProperties: true },
-      render(args, value) { return textBlock(value.text) },
+      render(args, value) {
+        const blocks = textBlock(value.text)
+        if (value && value.image && value.image.attachmentId) blocks.push({ type: 'image', attachment: value.image })
+        return blocks
+      },
+    }
+    async function materializeToolResult(value, toolName) {
+      if (!value || !value.imageData) return value
+      const { imageData, imageMediaType, ...rest } = value
+      if (!attachments || typeof attachments.saveImage !== 'function') return rest
+      const mediaType = String(imageMediaType || 'image/png')
+      const extension = mediaType === 'image/jpeg' ? 'jpg' : mediaType === 'image/webp' ? 'webp' : 'png'
+      const image = await attachments.saveImage({
+        data: Buffer.from(String(imageData), 'base64'),
+        mediaType,
+        name: toolName + '.' + extension,
+      })
+      return { ...rest, image }
     }
     function register(name, description, parameterProperties, run, timeoutMs) {
       const tool = defineTool({
@@ -467,92 +97,14 @@ export default {
         parameters: parameterProperties,
         output,
         timeoutMs,
-        execute(args, exec) { return run(args, exec) },
+        async execute(args, exec) { return materializeToolResult(await run(args, exec), name) },
       })
       const disposer = ctx.tools.register(tool)
       ctx.effect(() => disposer)
     }
 
-    register('pencil_status', 'Check pen.dev (pencil.dev) authentication status by running the official `pen status` CLI. Run this first before any design work to see whether you are logged in and with which account.',
-      {},
-      async (args, exec) => {
-        const r = await runCli(['status'], { exec, signal: exec.signal })
-        const text = (r.stdout || r.stderr || '').trim() || ('pen status exited with ' + r.exitCode)
-        return { ok: r.exitCode === 0, text }
-      }, 60000)
-
-    register('pencil_login', 'Log in to pen.dev. Call with {email} to request a one-time code by email (non-interactive OTP flow), then call again with {email, code} to complete login. The session persists in ~/.pencil/session-cli.json. Alternative: set PEN_CLI_KEY (organization developer key from pen.dev web app).',
-      {
-        email: { type: 'string', required: true, description: 'Your pen.dev account email.' },
-        code: { type: 'string', description: 'The OTP code emailed after the first call (omit on the first call).' },
-      },
-      async (args, exec) => {
-        const email = String(args.email || '').trim()
-        if (!email) return { ok: false, text: 'email is required' }
-        const argv = ['login', '--email', email]
-        if (args.code) argv.push('--code', String(args.code).trim())
-        const r = await runCli(argv, { exec, signal: exec.signal })
-        const text = (r.stdout || r.stderr || '').trim() || ('pen login exited with ' + r.exitCode)
-        return { ok: r.exitCode === 0, text }
-      }, 90000)
-
-    register('pencil_workspaces', 'List your pen.dev organizations and workspaces by running `pen --list-workspaces`. Useful to pick a --workspace slug for pencil_design.',
-      {},
-      async (args, exec) => {
-        const r = await runCli(['--list-workspaces'], { exec, signal: exec.signal })
-        const text = (r.stdout || r.stderr || '').trim() || ('pen --list-workspaces exited with ' + r.exitCode)
-        return { ok: r.exitCode === 0, text }
-      }, 60000)
-
-    register('pencil_design', 'Run the official pen.dev AI design agent on .pen files (NOT DeepSeek): `pen [--in <file.pen>] --out <file.pen> --prompt "..."`. Delegates to pen.dev\'s OWN agent, which requires a local Claude Code / Codex / Gemini CLI login. Prefer the pencil_mcp_* tools: DeepSeek itself drives the pen.dev headless engine as the agent. Output paths are relative to the session workspace. May take minutes.',
-      {
-        prompt: { type: 'string', required: true, description: 'Natural-language design instruction.' },
-        out: { type: 'string', description: 'Output .pen file path (default design.pen).' },
-        in: { type: 'string', description: 'Optional input .pen file to modify.' },
-        agent: { type: 'string', enum: ['claude', 'codex', 'gemini'], description: 'Agent backend (default claude).' },
-        model: { type: 'string', description: 'Optional model id.' },
-        workspace: { type: 'string', description: 'Optional pen.dev cloud workspace slug.' },
-        export: { type: 'string', description: 'Optional image export path.' },
-        exportType: { type: 'string', enum: ['png', 'jpeg', 'webp', 'pdf'], description: 'Export format (default png).' },
-      },
-      async (args, exec) => {
-        const prompt = String(args.prompt || '').trim()
-        if (!prompt) return { ok: false, text: 'prompt is required' }
-        const out = String(args.out || 'design.pen').trim()
-        const argv = ['--out', out]
-        if (args.in) argv.push('--in', String(args.in))
-        argv.push('--prompt', prompt)
-        if (args.agent) argv.push('--agent', String(args.agent))
-        if (args.model) argv.push('--model', String(args.model))
-        if (args.workspace) argv.push('--workspace', String(args.workspace))
-        if (args.export) {
-          argv.push('--export', String(args.export))
-          if (args.exportType) argv.push('--export-type', String(args.exportType))
-        }
-        const r = await runCli(argv, { exec, signal: exec.signal })
-        const tail = (r.stdout || '').trim()
-        const err = (r.stderr || '').trim()
-        let text = tail || err || ('pen design agent exited with ' + r.exitCode)
-        if (r.aborted) text += '\n[call aborted/timed out]'
-        return { ok: r.exitCode === 0 && !r.aborted, text }
-      }, 900000)
-
-    register('pencil_export', 'Export a .pen design file to an image without running any agent: `pen --in <file.pen> --export <out> --export-type <png|jpeg|webp|pdf>`. Uses the local headless engine; needs a saved .pen file.',
-      {
-        in: { type: 'string', required: true, description: 'Input .pen file path.' },
-        out: { type: 'string', description: 'Output image path without extension.' },
-        type: { type: 'string', enum: ['png', 'jpeg', 'webp', 'pdf'], description: 'Export format (default png).' },
-      },
-      async (args, exec) => {
-        const inp = String(args.in || '').trim()
-        if (!inp) return { ok: false, text: 'in (.pen file) is required' }
-        const out = String(args.out || 'export').trim()
-        const argv = ['--in', inp, '--export', out]
-        if (args.type) argv.push('--export-type', String(args.type))
-        const r = await runCli(argv, { exec, signal: exec.signal })
-        const text = (r.stdout || r.stderr || '').trim() || ('pen export exited with ' + r.exitCode)
-        return { ok: r.exitCode === 0 && !r.aborted, text }
-      }, 180000)
+    const legacyToolsEnabled = process.env.DSH_PEN_LEGACY_TOOLS === '1'
+    if (legacyToolsEnabled) registerLegacyTools({ register, runCli, workspaceForExec })
 
     register('pencil_mcp_open', 'Open (or switch) a .pen file for this conversation. If its browser canvas is open, the file is loaded into that live editor and later MCP edits render there immediately; otherwise a local headless engine is used. Call this FIRST with the target .pen path. Returns the current app state.',
       {
@@ -562,7 +114,7 @@ export default {
         const filePath = String(args.filePath || '').trim()
         if (!filePath) return { ok: false, text: 'filePath is required' }
         const workspace = workspaceForExec(exec)
-        const target = absPath(filePath, workspace)
+        const target = resolveWorkspacePath(workspace, filePath, { extension: '.pen', label: 'filePath' })
         const state = await runMcp('get_app_state', {
           filePath: target,
           include_schema: false,
@@ -586,8 +138,8 @@ export default {
           include_canvas_design: !!args.include_canvas_design,
           include_scripts_and_shaders: !!args.include_scripts_and_shaders,
         }
-        const engine = engineFor(exec)
-        if (engine.file) a.filePath = engine.file
+        const selectedFile = headless.selectedFile(exec)
+        if (selectedFile) a.filePath = selectedFile
         return runMcp('get_app_state', a, { exec, signal: exec.signal })
       }, 120000)
 
@@ -626,7 +178,7 @@ export default {
       },
       async (args, exec) => {
         const workspace = workspaceForExec(exec)
-        const a = { filePath: absPath(String(args.filePath || ''), workspace) }
+        const a = { filePath: resolveWorkspacePath(workspace, String(args.filePath || ''), { extension: '.pen', label: 'filePath' }) }
         if (args.input) a.input = String(args.input)
         if (args.editId) a.editId = String(args.editId)
         if (args.edits) a.edits = args.edits
@@ -642,7 +194,7 @@ export default {
       async (args, exec) => {
         // get_screenshot must NOT receive filePath (the server rejects it);
         // the engine is still started on the file via opts.filePath.
-        const fp = absPath(String(args.filePath || ''), workspaceForExec(exec))
+        const fp = resolveWorkspacePath(workspaceForExec(exec), String(args.filePath || ''), { extension: '.pen', label: 'filePath' })
         const nodeId = String(args.nodeId || 'document')
         return runMcp('get_screenshot', { nodeId }, { exec, filePath: fp, signal: exec.signal })
       }, 120000)
@@ -659,7 +211,11 @@ export default {
       },
       async (args, exec) => {
         const workspace = workspaceForExec(exec)
-        const a = { filePath: absPath(String(args.filePath || ''), workspace), nodeIds: Array.isArray(args.nodeIds) ? args.nodeIds : [], outputPath: absPath(String(args.outputPath || ''), workspace) }
+        const a = {
+          filePath: resolveWorkspacePath(workspace, String(args.filePath || ''), { extension: '.pen', label: 'filePath' }),
+          nodeIds: Array.isArray(args.nodeIds) ? args.nodeIds : [],
+          outputPath: resolveWorkspacePath(workspace, String(args.outputPath || ''), { label: 'outputPath' }),
+        }
         if (!a.filePath || !a.outputPath || !a.nodeIds.length) return { ok: false, text: 'filePath, nodeIds and outputPath are required' }
         if (args.format) a.format = args.format
         if (args.includeHtmlScaffold !== undefined) a.includeHtmlScaffold = !!args.includeHtmlScaffold
@@ -679,7 +235,11 @@ export default {
       },
       async (args, exec) => {
         const workspace = workspaceForExec(exec)
-        const a = { filePath: absPath(String(args.filePath || ''), workspace), nodeIds: Array.isArray(args.nodeIds) ? args.nodeIds : [], outputDir: absPath(String(args.outputDir || ''), workspace) }
+        const a = {
+          filePath: resolveWorkspacePath(workspace, String(args.filePath || ''), { extension: '.pen', label: 'filePath' }),
+          nodeIds: Array.isArray(args.nodeIds) ? args.nodeIds : [],
+          outputDir: resolveWorkspacePath(workspace, String(args.outputDir || ''), { label: 'outputDir' }),
+        }
         if (!a.filePath || !a.outputDir || !a.nodeIds.length) return { ok: false, text: 'filePath, nodeIds and outputDir are required' }
         if (args.format) a.format = args.format
         if (args.quality !== undefined) a.quality = Number(args.quality)
@@ -695,6 +255,7 @@ export default {
       const sessionCli = path.join(os.homedir(), '.pencil', 'session-cli.json')
       const uiState = { email: '', token: '' }
       const bindings = new Map()
+      const bindingsBySession = new Map()
       // This must match CURRENT_SCHEMA_VERSION in the bundled pen-editor assets.
       // The editor rejects every other version instead of migrating it in place.
       const EDITOR_SCHEMA_VERSION = '2.14'
@@ -716,16 +277,27 @@ export default {
       function bindingForExec(exec) {
         const sessionId = sessionIdForExec(exec)
         if (!sessionId) return undefined
-        return [...bindings.values()].find((binding) => binding.sessionId === sessionId)
+        const key = bindingsBySession.get(sessionId)
+        return key ? bindings.get(key) : undefined
+      }
+      function takeCanvasMessages(binding) {
+        const messages = binding.queue.splice(0, binding.queue.length)
+        for (const message of messages) {
+          if (!message || message.type !== 'request') continue
+          const pending = binding.pendingRequests.get(message.id)
+          if (pending) pending.delivered = true
+        }
+        return messages
       }
       function pushCanvasMessage(binding, message) {
         binding.queue.push(message)
         const waiter = binding.pollWaiters.shift()
-        if (waiter) waiter.finish(binding.queue.splice(0, binding.queue.length))
+        if (waiter) waiter.finish(takeCanvasMessages(binding))
       }
       function rejectCanvasRequests(binding, error) {
         for (const pending of binding.pendingRequests.values()) {
           clearTimeout(pending.timer)
+          if (pending.signal && pending.onAbort) pending.signal.removeEventListener('abort', pending.onAbort)
           pending.reject(error)
         }
         binding.pendingRequests.clear()
@@ -734,18 +306,38 @@ export default {
           waiter.reject(error)
         }
       }
-      function requestCanvas(binding, method, payload, timeoutMs = 120000) {
+      function releaseBinding(binding, reason) {
+        if (!binding) return
+        rejectCanvasRequests(binding, reason || new Error('pen.dev canvas binding released'))
+        for (const waiter of binding.pollWaiters.splice(0)) waiter.finish([])
+        bindings.delete(binding.key)
+        if (bindingsBySession.get(binding.sessionId) === binding.key) bindingsBySession.delete(binding.sessionId)
+      }
+      function requestCanvas(binding, method, payload, timeoutMs = 120000, signal) {
         if (!binding.initialized || Date.now() - binding.lastSeen > 30000) {
           return Promise.reject(new Error('the conversation canvas is not connected'))
         }
+        if (signal && signal.aborted) return Promise.reject(new Error('canvas request cancelled before delivery'))
         return new Promise((resolve, reject) => {
           hostMsgSeq += 1
           const id = 'host-' + hostMsgSeq + '-' + Date.now()
-          const timer = setTimeout(() => {
+          const cancel = (reason) => {
+            const pending = binding.pendingRequests.get(id)
+            if (!pending) return
             binding.pendingRequests.delete(id)
-            reject(new Error('canvas request ' + method + ' timed out after ' + timeoutMs + 'ms'))
-          }, timeoutMs)
-          binding.pendingRequests.set(id, { resolve, reject, timer, method })
+            clearTimeout(pending.timer)
+            if (pending.signal && pending.onAbort) pending.signal.removeEventListener('abort', pending.onAbort)
+            const queued = binding.queue.findIndex((message) => message && message.id === id)
+            if (queued !== -1) binding.queue.splice(queued, 1)
+            const suffix = pending.delivered || queued === -1
+              ? '; the editor may still complete it, so inspect canvas state before retrying'
+              : ' before delivery'
+            reject(new Error(reason + suffix))
+          }
+          const timer = setTimeout(() => cancel('canvas request ' + method + ' timed out after ' + timeoutMs + 'ms'), timeoutMs)
+          const onAbort = () => cancel('canvas request ' + method + ' was cancelled')
+          binding.pendingRequests.set(id, { resolve, reject, timer, method, delivered: false, signal, onAbort })
+          if (signal) signal.addEventListener('abort', onAbort, { once: true })
           pushCanvasMessage(binding, { id, type: 'request', method, payload })
         })
       }
@@ -830,10 +422,11 @@ export default {
         throw new Error('pen-editor assets unavailable; set DSH_PEN_EDITOR_DIR to pen-editor/out')
       }
 
+      try { fs.chmodSync(stateFile, 0o600) } catch (err) { /* no persisted state yet */ }
       try {
         const s = JSON.parse(fs.readFileSync(stateFile, 'utf8'))
         if (s && s.token) { uiState.email = s.email || ''; uiState.token = s.token }
-      } catch (err) { /* no persisted state yet */ }
+      } catch (err) { /* no valid persisted state yet */ }
       function sessionState() {
         if (uiState.email && uiState.token) return { email: uiState.email, token: uiState.token }
         try {
@@ -844,10 +437,16 @@ export default {
       }
       function sessionToken() { return sessionState().token || null }
       function persistState() {
+        const temporary = stateFile + '.tmp-' + randomUUID()
         try {
-          fs.mkdirSync(path.dirname(stateFile), { recursive: true })
-          fs.writeFileSync(stateFile, JSON.stringify(uiState, null, 2))
-        } catch (err) { /* ignore */ }
+          fs.mkdirSync(path.dirname(stateFile), { recursive: true, mode: 0o700 })
+          fs.writeFileSync(temporary, JSON.stringify(uiState, null, 2), { mode: 0o600 })
+          fs.renameSync(temporary, stateFile)
+          fs.chmodSync(stateFile, 0o600)
+        } catch (err) {
+          try { fs.unlinkSync(temporary) } catch (cleanupError) { /* no temporary state */ }
+          console.warn('[pen-dev-bridge] failed to persist browser session:', err && err.message)
+        }
       }
       function urlOf(req) {
         return new URL(String(req.url || '/'), 'http://127.0.0.1')
@@ -864,24 +463,13 @@ export default {
         return bindings.get(urlOf(req).searchParams.get('binding') || '')
       }
       function insideWorkspace(binding, input) {
-        const decoded = uriToPath(input)
-        const target = path.resolve(binding.workspace, decoded)
-        const rel = path.relative(binding.workspace, target)
-        if (rel === '..' || rel.startsWith('..' + path.sep) || path.isAbsolute(rel)) {
-          throw new Error('path escapes the bound session workspace')
-        }
-        return target
+        return resolveWorkspacePath(binding.workspace, uriToPath(input))
       }
       function defaultFile(workspace) {
         const configured = process.env.DSH_PEN_FILE
-        const target = configured
-          ? (path.isAbsolute(configured) ? configured : path.join(workspace, configured))
-          : path.join(workspace, 'designs', 'design.pen')
-        const rel = path.relative(workspace, path.resolve(target))
-        if (rel === '..' || rel.startsWith('..' + path.sep) || path.isAbsolute(rel)) {
-          throw new Error('DSH_PEN_FILE must stay inside the bound conversation workspace')
-        }
-        return path.resolve(target)
+        return resolveWorkspacePath(workspace, configured || path.join('designs', 'design.pen'), {
+          extension: '.pen', label: 'DSH_PEN_FILE',
+        })
       }
       async function writeFileAtomic(target, content) {
         await fsp.mkdir(path.dirname(target), { recursive: true })
@@ -1066,19 +654,17 @@ __penPoll();
         const live = ctx.sessions && typeof ctx.sessions.get === 'function' ? ctx.sessions.get(sessionId) : undefined
         const liveCwd = live && live.header && live.header.cwd ? path.resolve(String(live.header.cwd)) : undefined
         const requestedCwd = body.workspace ? path.resolve(String(body.workspace)) : undefined
-        if (liveCwd && requestedCwd && liveCwd !== requestedCwd) {
+        if (!liveCwd) {
+          res.writeHead(404); res.end('conversation is not available'); return
+        }
+        if (requestedCwd && liveCwd !== requestedCwd) {
           res.writeHead(409); res.end('workspace does not match the conversation'); return
         }
-        const workspace = liveCwd || requestedCwd
-        if (!workspace || !path.isAbsolute(workspace)) {
-          res.writeHead(409); res.end('conversation has no workspace'); return
-        }
-        const sessionEngine = engines.get(sessionId)
-        if (sessionEngine && sessionEngine.handle) {
-          try { await stopEngine(sessionEngine) }
-          catch (err) { res.writeHead(409); res.end('failed to hand off headless document: ' + err.message); return }
-        }
-        const existing = [...bindings.values()].find((item) => item.sessionId === sessionId)
+        const workspace = liveCwd
+        try { await headless.releaseSession(sessionId) }
+        catch (err) { res.writeHead(409); res.end('failed to hand off headless document: ' + err.message); return }
+        const existingKey = bindingsBySession.get(sessionId)
+        const existing = existingKey ? bindings.get(existingKey) : undefined
         if (existing) {
           res.writeHead(200, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ binding: existing.key, workspace: existing.workspace, file: existing.currentFile }))
@@ -1095,8 +681,23 @@ __penPoll();
           serial: Promise.resolve(),
         }
         bindings.set(key, binding)
+        bindingsBySession.set(sessionId, key)
         res.writeHead(200, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ binding: key, workspace, file: binding.currentFile }))
+      }
+      async function handleUnbind(req, res) {
+        const binding = bindingOf(req)
+        if (!binding) { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ ok: true })); return }
+        try {
+          await enqueueCanvas(binding, async () => {
+            if (binding.initialized && binding.loadedFile === binding.currentFile) await saveCanvas(binding)
+          })
+        } catch (error) {
+          res.writeHead(409); res.end('failed to save canvas before release: ' + (error && error.message ? error.message : String(error))); return
+        }
+        releaseBinding(binding)
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: true }))
       }
       async function listPenFiles(workspace) {
         const files = []
@@ -1224,6 +825,7 @@ __penPoll();
           if (pending) {
             binding.pendingRequests.delete(msg.id)
             clearTimeout(pending.timer)
+            if (pending.signal && pending.onAbort) pending.signal.removeEventListener('abort', pending.onAbort)
             if (msg.error) pending.reject(new Error(msg.error.message || ('canvas ' + pending.method + ' failed')))
             else pending.resolve(msg.payload)
           }
@@ -1306,15 +908,20 @@ __penPoll();
         await queueCurrentFile(binding)
         if (binding.loadedFile !== target) throw new Error('canvas refused to load ' + target)
       }
-      function canvasResultText(result) {
+      function canvasResult(result) {
         if (result && result.image) {
           const bytes = Math.round(String(result.image).length * 0.75 / 1024)
-          return '[screenshot: ' + bytes + ' KB ' + String(result.mimeType || 'image/png') + ' (base64)]'
+          const imageMediaType = String(result.mimeType || 'image/png')
+          return {
+            text: '[screenshot: ' + bytes + ' KB ' + imageMediaType + ']',
+            imageData: String(result.image),
+            imageMediaType,
+          }
         }
-        if (result && result.message != null) return String(result.message)
-        return result === undefined ? '' : JSON.stringify(result)
+        if (result && result.message != null) return { text: String(result.message) }
+        return { text: result === undefined ? '' : JSON.stringify(result) }
       }
-      canvasBridge = {
+      const canvasBridge = {
         has(exec) { return !!bindingForExec(exec) },
         supports(tool) { return !!canvasMethods[tool] },
         async flush(opts, fileArg) {
@@ -1350,12 +957,13 @@ __penPoll();
               if (method === 'batch-design' && !payload.input) {
                 return { ok: false, text: 'This canvas editor requires input; editId patch retries are unavailable.' }
               }
-              const response = await withSignal(requestCanvas(binding, method, payload), opts.signal)
+              const response = await requestCanvas(binding, method, payload, 120000, opts.signal)
               if (response && response.success === false) {
                 return { ok: false, text: 'Canvas error: ' + String(response.error || 'tool call failed').slice(0, 4000) }
               }
               const result = response && Object.prototype.hasOwnProperty.call(response, 'result') ? response.result : response
-              let text = canvasResultText(result)
+              const rendered = canvasResult(result)
+              let text = rendered.text
               if (tool === 'execute') {
                 binding.dirty = true
                 try {
@@ -1365,13 +973,20 @@ __penPoll();
                   return { ok: false, text: text.slice(0, 6000) + '\n\nCanvas edit succeeded, but disk save failed: ' + (err && err.message ? err.message : String(err)) }
                 }
               }
-              return { ok: true, mode: 'canvas', text: text.slice(0, 8000) }
+              return {
+                ok: true,
+                mode: 'canvas',
+                text: text.slice(0, 8000),
+                ...(rendered.imageData ? { imageData: rendered.imageData, imageMediaType: rendered.imageMediaType } : {}),
+              }
             } catch (err) {
               return { ok: false, text: 'Live canvas call failed: ' + (err && err.message ? err.message : String(err)) }
             }
           })
         },
       }
+
+      headless.setCanvasBridge(canvasBridge)
 
       const routeDisposers = []
       routeDisposers.push(webServer.register({ kind: 'prefix', path: '/pen-editor', handler: (req, res) => {
@@ -1380,6 +995,7 @@ __penPoll();
         })
       } }))
       routeDisposers.push(webServer.register({ kind: 'exact', path: '/pen-host/bind', handler: handleBind }))
+      routeDisposers.push(webServer.register({ kind: 'exact', path: '/pen-host/unbind', handler: handleUnbind }))
       routeDisposers.push(webServer.register({ kind: 'exact', path: '/pen-host/files', handler: handleFiles }))
       routeDisposers.push(webServer.register({ kind: 'exact', path: '/pen-host/file', handler: handleFile }))
       routeDisposers.push(webServer.register({ kind: 'exact', path: '/pen-host/reveal', handler: handleReveal }))
@@ -1392,7 +1008,7 @@ __penPoll();
           res.writeHead(200, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ messages }))
         }
-        if (binding.queue.length) { send(binding.queue.splice(0, binding.queue.length)); return }
+        if (binding.queue.length) { send(takeCanvasMessages(binding)); return }
         const waiter = { done: false, timer: null, finish: null }
         waiter.finish = (messages) => {
           if (waiter.done) return
@@ -1425,16 +1041,14 @@ __penPoll();
       } }))
       for (const d of routeDisposers) if (d) ctx.effect(() => d)
       ctx.effect(() => () => {
-        canvasBridge = null
-        for (const binding of bindings.values()) {
-          rejectCanvasRequests(binding, new Error('pen.dev canvas bridge stopped'))
-          for (const waiter of binding.pollWaiters.splice(0)) waiter.finish([])
-        }
-        bindings.clear()
+        headless.setCanvasBridge(null)
+        for (const binding of [...bindings.values()]) releaseBinding(binding, new Error('pen.dev canvas bridge stopped'))
+        bindingsBySession.clear()
       })
       console.log('[pen-dev-bridge] pen.dev canvas routes ready at /pen-editor (binds workspace on conversation trigger)')
     }
 
-    console.log(`[pen-dev-bridge] registered 12 pencil_* tools (pen=${penBin}, mcp=${mcpBin}; workspace resolves per call)`)
+    const toolCount = legacyToolsEnabled ? 12 : 7
+    console.log(`[pen-dev-bridge] registered ${toolCount} pencil_* tools (pen=${penBin}, mcp=${mcpBin}; workspace resolves per call)`)
   },
 }

@@ -1,6 +1,6 @@
 {
   "name": "pen-dev-bridge-bundle",
-  "version": "0.3.5",
+  "version": "0.4.0",
   "description": "DSH bundle: mounts the pen-dev-bridge host plugin (official Pencil MCP tools + headless engine) via a cordis.patch.yml insert.",
   "private": true,
   "dsh": {
