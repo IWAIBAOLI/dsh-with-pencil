@@ -243,7 +243,7 @@ export default {
         stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n')
       })
       const init = async () => {
-        await call('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'dsh-pen-dev-bridge', version: '0.2.1' } })
+        await call('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'dsh-pen-dev-bridge', version: '0.3.0' } })
         stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n')
       }
       const close = () => { try { handle.terminate() } catch (err) { /* ignore */ } }
@@ -597,14 +597,15 @@ export default {
         const s = JSON.parse(fs.readFileSync(stateFile, 'utf8'))
         if (s && s.token) { uiState.email = s.email || ''; uiState.token = s.token }
       } catch (err) { /* no persisted state yet */ }
-      function sessionToken() {
-        if (uiState.token) return uiState.token
+      function sessionState() {
+        if (uiState.email && uiState.token) return { email: uiState.email, token: uiState.token }
         try {
           const cli = JSON.parse(fs.readFileSync(sessionCli, 'utf8'))
-          if (cli && cli.token) return cli.token
+          if (cli && cli.email && cli.token) return { email: cli.email, token: cli.token }
         } catch (err) { /* not logged in via CLI either */ }
-        return null
+        return { email: '', token: '' }
       }
+      function sessionToken() { return sessionState().token || null }
       function persistState() {
         try {
           fs.mkdirSync(path.dirname(stateFile), { recursive: true })
@@ -793,6 +794,71 @@ setInterval(function () {
         res.writeHead(200, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ binding: key, workspace, file: binding.currentFile }))
       }
+      async function listPenFiles(workspace) {
+        const files = []
+        const skipped = new Set(['.git', '.hg', '.svn', 'node_modules', 'dist', 'build', 'out'])
+        async function walk(dir, depth) {
+          if (depth > 5 || files.length >= 100) return
+          let entries
+          try { entries = await fsp.readdir(dir, { withFileTypes: true }) }
+          catch (err) { return }
+          entries.sort((a, b) => a.name.localeCompare(b.name))
+          for (const entry of entries) {
+            if (files.length >= 100) break
+            if (entry.name.startsWith('.') || skipped.has(entry.name)) continue
+            const full = path.join(dir, entry.name)
+            if (entry.isDirectory()) await walk(full, depth + 1)
+            else if (entry.isFile() && entry.name.toLowerCase().endsWith('.pen')) {
+              files.push(path.relative(workspace, full).split(path.sep).join('/'))
+            }
+          }
+        }
+        await walk(workspace, 0)
+        return files
+      }
+      async function handleFiles(req, res) {
+        const binding = bindingOf(req)
+        if (!binding) { res.writeHead(401); res.end('invalid canvas binding'); return }
+        const files = await listPenFiles(binding.workspace)
+        const current = path.relative(binding.workspace, binding.currentFile).split(path.sep).join('/')
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ files, current }))
+      }
+      async function handleFile(req, res) {
+        const binding = bindingOf(req)
+        if (!binding) { res.writeHead(401); res.end('invalid canvas binding'); return }
+        let body
+        try { body = await readBody(req) }
+        catch (err) { res.writeHead(400); res.end('bad json'); return }
+        let target
+        try { target = insideWorkspace(binding, body.file) }
+        catch (err) { res.writeHead(403); res.end(err.message); return }
+        if (path.extname(target).toLowerCase() !== '.pen') {
+          res.writeHead(400); res.end('canvas file must end in .pen'); return
+        }
+        binding.currentFile = target
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ file: target }))
+      }
+      async function handleReveal(req, res) {
+        const binding = bindingOf(req)
+        if (!binding) { res.writeHead(401); res.end('invalid canvas binding'); return }
+        const argv = process.platform === 'darwin'
+          ? ['/usr/bin/open', binding.workspace]
+          : process.platform === 'win32'
+            ? ['explorer.exe', binding.workspace]
+            : ['xdg-open', binding.workspace]
+        try {
+          const handle = sub.spawn({ argv, cwd: binding.workspace, env: {} })
+          if (handle && handle.done && typeof handle.done.catch === 'function') {
+            handle.done.catch((err) => console.warn('[pen-dev-bridge] reveal workspace failed', err && err.message))
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ ok: true }))
+        } catch (err) {
+          res.writeHead(500); res.end(err && err.message ? err.message : String(err))
+        }
+      }
       async function handleIpc(req, res) {
         const binding = bindingOf(req)
         if (!binding) { res.writeHead(401); res.end('invalid canvas binding'); return }
@@ -829,7 +895,7 @@ setInterval(function () {
         const payload = msg.payload || {}
         let out
         switch (msg.method) {
-          case 'get-session': out = { token: sessionToken() }; break
+          case 'get-session': out = sessionState(); break
           case 'get-current-workspace': out = { label: 'DeepSeek Harness', rootPath: binding.workspace }; break
           case 'get-device-id': out = { deviceId: 'dsh-local' }; break
           case 'get-last-online-at': out = { lastOnlineAt: Date.now() }; break
@@ -875,6 +941,9 @@ setInterval(function () {
         })
       } }))
       routeDisposers.push(webServer.register({ kind: 'exact', path: '/pen-host/bind', handler: handleBind }))
+      routeDisposers.push(webServer.register({ kind: 'exact', path: '/pen-host/files', handler: handleFiles }))
+      routeDisposers.push(webServer.register({ kind: 'exact', path: '/pen-host/file', handler: handleFile }))
+      routeDisposers.push(webServer.register({ kind: 'exact', path: '/pen-host/reveal', handler: handleReveal }))
       routeDisposers.push(webServer.register({ kind: 'exact', path: '/pen-host/ipc', handler: handleIpc }))
       routeDisposers.push(webServer.register({ kind: 'exact', path: '/pen-host/pending', handler: async (req, res) => {
         const binding = bindingOf(req)

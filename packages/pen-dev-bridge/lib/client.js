@@ -18,10 +18,22 @@ window.__ModuleLoader__.load({
 .dsh-penhost-resize { position: absolute; left: -4px; top: 0; bottom: 0; width: 8px; cursor: col-resize; z-index: 3; }
 .dsh-penhost-resize::after { content: ''; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 4px; height: 44px; border-radius: 3px; background: var(--dsw-alias-border-l2, #3a3d4a); }
 .dsh-penhost-resize:hover::after { background: var(--dsw-alias-brand-primary, #4f7cff); }
-.dsh-penhost-head { display: flex; align-items: center; gap: 8px; padding: 9px 12px; cursor: grab; background: var(--dsw-alias-bg-layer-1, #26272e); border-bottom: 1px solid var(--dsw-alias-border-l1, #34353d); user-select: none; }
+.dsh-penhost-head { position: relative; display: flex; align-items: center; gap: 6px; min-height: 42px; padding: 6px 8px 6px 10px; cursor: grab; background: var(--dsw-alias-bg-layer-1, #26272e); border-bottom: 1px solid var(--dsw-alias-border-l1, #34353d); user-select: none; }
 .dsh-penhost-split .dsh-penhost-head { cursor: default; }
-.dsh-penhost-head strong { font-size: 13px; }
-.dsh-penhost-head span { color: var(--dsw-alias-label-secondary, #9aa0b4); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dsh-penhost-brand { flex: 0 0 auto; margin-right: 2px; font-size: 13px; white-space: nowrap; }
+.dsh-penhost-menu-wrap { position: relative; min-width: 0; }
+.dsh-penhost-workspace-wrap { max-width: 34%; }
+.dsh-penhost-file-wrap { flex: 1 1 auto; }
+.dsh-penhost-menu-btn { display: block; width: 100%; min-width: 0; padding: 4px 8px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--dsw-alias-label-secondary, #a8adbd); cursor: pointer; font: inherit; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+.dsh-penhost-menu-btn:hover, .dsh-penhost-menu-btn[aria-expanded="true"] { color: var(--dsw-alias-label-primary, #eee); background: rgba(255,255,255,.07); border-color: var(--dsw-alias-border-l1, #34353d); }
+.dsh-penhost-menu { position: absolute; left: 0; top: calc(100% + 7px); z-index: 8; min-width: 230px; max-width: min(420px, 80vw); padding: 5px; border: 1px solid var(--dsw-alias-border-l2, #3a3d4a); border-radius: 9px; background: var(--dsw-alias-bg-overlay, #1d1e24); box-shadow: 0 12px 32px rgba(0,0,0,.42); }
+.dsh-penhost-path { padding: 7px 8px; color: var(--dsw-alias-label-secondary, #9aa0b4); font-size: 10px; line-height: 1.4; overflow-wrap: anywhere; user-select: text; }
+.dsh-penhost-menu-sep { height: 1px; margin: 4px 3px; background: var(--dsw-alias-border-l1, #34353d); }
+.dsh-penhost-menu-item { display: flex; width: 100%; align-items: center; gap: 7px; padding: 7px 8px; border: none; border-radius: 6px; background: transparent; color: var(--dsw-alias-label-primary, #eee); cursor: pointer; font: inherit; font-size: 12px; text-align: left; }
+.dsh-penhost-menu-item:hover { background: rgba(255,255,255,.08); }
+.dsh-penhost-menu-item[aria-current="true"]::before { content: '✓'; width: 12px; color: var(--dsw-alias-brand-primary, #4f7cff); }
+.dsh-penhost-menu-item:not([aria-current="true"])::before { content: ''; width: 12px; }
+.dsh-penhost-menu-note { padding: 8px; color: var(--dsw-alias-label-secondary, #9aa0b4); font-size: 11px; }
 .dsh-penhost-mode { border: 1px solid var(--dsw-alias-border-l1, #34353d); background: transparent; color: var(--dsw-alias-label-primary, #eee); cursor: pointer; font-size: 11px; padding: 3px 8px; border-radius: 6px; }
 .dsh-penhost-mode:hover { border-color: var(--dsw-alias-brand-primary, #4f7cff); }
 .dsh-penhost-close { margin-left: auto; border: none; background: transparent; color: var(--dsw-alias-label-secondary, #9aa0b4); cursor: pointer; font-size: 13px; padding: 2px 8px; border-radius: 6px; }
@@ -118,6 +130,17 @@ html[data-penhost-pointer="drag"], html[data-penhost-pointer="drag"] * { cursor:
 			} catch (error) { return null }
 		}
 
+		function pathName(value) {
+			const parts = String(value || '').replace(/\\/g, '/').split('/').filter(Boolean)
+			return parts[parts.length - 1] || '工作区'
+		}
+
+		function workspaceRelative(workspace, file) {
+			const root = String(workspace || '').replace(/\\/g, '/').replace(/\/$/, '')
+			const target = String(file || '').replace(/\\/g, '/')
+			return root && target.startsWith(root + '/') ? target.slice(root.length + 1) : pathName(target)
+		}
+
 		function trackPointer(event, mode, ref, onMove) {
 			const target = event.currentTarget
 			const pointerId = event.pointerId
@@ -151,6 +174,13 @@ html[data-penhost-pointer="drag"], html[data-penhost-pointer="drag"] * { cursor:
 			const { store, sessionId, state, active } = props
 			const dragRef = React.useRef(null)
 			const resizeRef = React.useRef(null)
+			const frameRef = React.useRef(null)
+			const menusRef = React.useRef(null)
+			const fileMenuRef = React.useRef(null)
+			const [menu, setMenu] = React.useState(null)
+			const [files, setFiles] = React.useState([])
+			const [filesLoading, setFilesLoading] = React.useState(false)
+			const [menuError, setMenuError] = React.useState(null)
 			const clampWide = React.useCallback((value) => Math.min(Math.max(Math.round(value), 400), Math.max(400, window.innerWidth - 560)), [])
 			const effectiveWide = state.wide || clampWide(window.innerWidth * 0.5)
 
@@ -191,6 +221,17 @@ html[data-penhost-pointer="drag"], html[data-penhost-pointer="drag"] * { cursor:
 				if (drag) drag.finish()
 			}, [])
 
+			React.useEffect(() => {
+				if (!menu) return
+				const onOutside = (event) => {
+					const inWorkspace = menusRef.current && menusRef.current.contains(event.target)
+					const inFile = fileMenuRef.current && fileMenuRef.current.contains(event.target)
+					if (!inWorkspace && !inFile) setMenu(null)
+				}
+				window.addEventListener('pointerdown', onOutside, true)
+				return () => window.removeEventListener('pointerdown', onOutside, true)
+			}, [menu])
+
 			const startResize = (event) => {
 				if (state.mode !== 'split' || (event.button !== 0 && event.pointerType === 'mouse')) return
 				event.preventDefault(); event.stopPropagation()
@@ -220,7 +261,63 @@ html[data-penhost-pointer="drag"], html[data-penhost-pointer="drag"] * { cursor:
 				trackPointer(event, 'drag', dragRef, onMove)
 			}
 
+			const loadFiles = async () => {
+				setFilesLoading(true); setMenuError(null)
+				try {
+					const response = await fetch('/pen-host/files?binding=' + encodeURIComponent(state.binding))
+					if (!response.ok) throw new Error((await response.text()) || ('HTTP ' + response.status))
+					const result = await response.json()
+					setFiles(Array.isArray(result.files) ? result.files : [])
+				} catch (error) {
+					setMenuError(error && error.message ? error.message : String(error))
+				} finally { setFilesLoading(false) }
+			}
+
+			const showFileMenu = () => {
+				const next = menu === 'file' ? null : 'file'
+				setMenu(next); setMenuError(null)
+				if (next) void loadFiles()
+			}
+
+			const revealWorkspace = async () => {
+				setMenuError(null)
+				try {
+					const response = await fetch('/pen-host/reveal?binding=' + encodeURIComponent(state.binding), { method: 'POST' })
+					if (!response.ok) throw new Error((await response.text()) || ('HTTP ' + response.status))
+					setMenu(null)
+				} catch (error) { setMenuError(error && error.message ? error.message : String(error)) }
+			}
+
+			const switchFile = async (file) => {
+				setMenuError(null)
+				try {
+					if (frameRef.current && frameRef.current.contentWindow) {
+						frameRef.current.contentWindow.postMessage({ id: 'penhost-switch-' + Date.now(), type: 'request', method: 'save-document', payload: {} }, '*')
+						await new Promise((resolve) => setTimeout(resolve, 350))
+					}
+					const response = await fetch('/pen-host/file?binding=' + encodeURIComponent(state.binding), {
+						method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ file }),
+					})
+					if (!response.ok) throw new Error((await response.text()) || ('HTTP ' + response.status))
+					const result = await response.json()
+					store.patch(sessionId, { file: result.file, error: null })
+					setMenu(null)
+				} catch (error) { setMenuError(error && error.message ? error.message : String(error)) }
+			}
+
+			const createFile = () => {
+				let file = window.prompt('新建 .pen 文件（相对于当前工作区）', 'designs/untitled.pen')
+				if (file === null) return
+				file = String(file).trim()
+				if (!file) return
+				if (!file.toLowerCase().endsWith('.pen')) file += '.pen'
+				void switchFile(file)
+			}
+
 			const isSplit = state.mode === 'split'
+			const workspaceLabel = pathName(state.workspace)
+			const currentFile = workspaceRelative(state.workspace, state.file)
+			const visibleFiles = currentFile && !files.includes(currentFile) ? [currentFile, ...files] : files
 			const position = state.pos || { x: Math.max(12, window.innerWidth - 920), y: Math.max(12, window.innerHeight - 720) }
 			const style = isSplit
 				? { right: 0, top: 0, bottom: 0, width: effectiveWide + 'px' }
@@ -234,8 +331,31 @@ html[data-penhost-pointer="drag"], html[data-penhost-pointer="drag"] * { cursor:
 			},
 				isSplit ? React.createElement('div', { className: 'dsh-penhost-resize', title: '拖动调整宽度', onPointerDown: startResize }) : null,
 				React.createElement('div', { className: 'dsh-penhost-head', onPointerDown: startDrag },
-					React.createElement('strong', null, '✏ pen.dev 画布'),
-					React.createElement('span', { title: state.file || '' }, isSplit ? '当前会话 · 右侧分屏 · 自动保存' : '当前会话 · 浮动窗口 · 自动保存'),
+					React.createElement('strong', { className: 'dsh-penhost-brand' }, '✏ pen.dev'),
+					React.createElement('div', { className: 'dsh-penhost-menu-wrap dsh-penhost-workspace-wrap', ref: menusRef, onPointerDown: (event) => event.stopPropagation() },
+						React.createElement('button', {
+							className: 'dsh-penhost-menu-btn', title: state.workspace || '', 'aria-haspopup': 'menu', 'aria-expanded': menu === 'workspace',
+							onClick: () => { setMenu(menu === 'workspace' ? null : 'workspace'); setMenuError(null) },
+						}, '⌂ ' + workspaceLabel),
+						menu === 'workspace' ? React.createElement('div', { className: 'dsh-penhost-menu', role: 'menu' },
+							React.createElement('div', { className: 'dsh-penhost-path' }, state.workspace),
+							React.createElement('div', { className: 'dsh-penhost-menu-sep' }),
+							React.createElement('button', { className: 'dsh-penhost-menu-item', role: 'menuitem', onClick: () => { void revealWorkspace() } }, '打开工作区文件夹'),
+							menuError ? React.createElement('div', { className: 'dsh-penhost-menu-note' }, menuError) : null) : null),
+					React.createElement('div', { className: 'dsh-penhost-menu-wrap dsh-penhost-file-wrap', ref: fileMenuRef, onPointerDown: (event) => event.stopPropagation() },
+						React.createElement('button', {
+							className: 'dsh-penhost-menu-btn', title: state.file || '', 'aria-haspopup': 'menu', 'aria-expanded': menu === 'file', onClick: showFileMenu,
+						}, currentFile || '选择 .pen 文件'),
+						menu === 'file' ? React.createElement('div', { className: 'dsh-penhost-menu', role: 'menu' },
+							React.createElement('button', { className: 'dsh-penhost-menu-item', role: 'menuitem', onClick: createFile }, '新建 .pen 文件…'),
+							React.createElement('div', { className: 'dsh-penhost-menu-sep' }),
+							filesLoading ? React.createElement('div', { className: 'dsh-penhost-menu-note' }, '正在查找 .pen 文件…') : null,
+							!filesLoading && !visibleFiles.length ? React.createElement('div', { className: 'dsh-penhost-menu-note' }, '工作区内没有 .pen 文件') : null,
+							!filesLoading ? visibleFiles.map((file) => React.createElement('button', {
+								key: file, className: 'dsh-penhost-menu-item', role: 'menuitem', 'aria-current': file === currentFile ? 'true' : undefined,
+								title: file, onClick: () => { if (file === currentFile) setMenu(null); else void switchFile(file) },
+							}, file)) : null,
+							menuError ? React.createElement('div', { className: 'dsh-penhost-menu-note' }, menuError) : null) : null),
 					React.createElement('button', {
 						className: 'dsh-penhost-mode',
 						title: isSplit ? '切换为浮动窗口' : '切换为右侧分屏',
@@ -248,7 +368,7 @@ html[data-penhost-pointer="drag"], html[data-penhost-pointer="drag"] * { cursor:
 						onClick: () => store.patch(sessionId, { open: false }),
 					}, '✕')),
 				React.createElement('div', { className: 'dsh-penhost-body' },
-					React.createElement('iframe', { className: 'dsh-penhost-frame', src: editorUrl, title: 'pen.dev 画布编辑器', allow: 'clipboard-read; clipboard-write' })))
+					React.createElement('iframe', { key: state.file || state.binding, ref: frameRef, className: 'dsh-penhost-frame', src: editorUrl, title: 'pen.dev 画布编辑器', allow: 'clipboard-read; clipboard-write' })))
 		}
 
 		function PenOverlay(props) {

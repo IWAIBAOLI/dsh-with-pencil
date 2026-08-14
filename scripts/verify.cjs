@@ -154,6 +154,9 @@ try {
   if (!client.includes('setPointerCapture(pointerId)') || !client.includes('html[data-penhost-pointer] .dsh-penhost-frame { pointer-events: none')) {
     fail('canvas resize/drag must keep pointer ownership across the editor iframe')
   } else ok('canvas resize/drag keeps pointer ownership across the editor iframe')
+  if (!client.includes('打开工作区文件夹') || !client.includes('新建 .pen 文件') || client.includes('当前会话 · 右侧分屏 · 自动保存')) {
+    fail('canvas toolbar must expose concise workspace/file controls')
+  } else ok('canvas toolbar exposes concise workspace/file controls')
 } catch (err) { fail('browser half: ' + err.message) }
 
 // 4c. The host must not derive a workspace from its launch directory. Both
@@ -165,6 +168,12 @@ if (pluginSource.includes('process.cwd()')) {
 if (!pluginSource.includes('function workspaceForExec(exec)') || !pluginSource.includes("path: '/pen-host/bind'")) {
   fail('host must resolve tool workspaces per call and expose the canvas bind route')
 } else ok('host resolves workspaces per call and exposes the bind route')
+if (!pluginSource.includes("path: '/pen-host/files'") || !pluginSource.includes("path: '/pen-host/file'") || !pluginSource.includes("path: '/pen-host/reveal'")) {
+  fail('host must expose bound .pen file selection and workspace reveal routes')
+} else ok('host exposes bound .pen file selection and workspace reveal routes')
+if (!pluginSource.includes("case 'get-session': out = sessionState()") || !pluginSource.includes('return { email: uiState.email, token: uiState.token }')) {
+  fail('new conversation canvases must reuse profile-level email and token')
+} else ok('new conversation canvases reuse profile-level email and token')
 if (!pluginSource.includes('path escapes the bound session workspace')) {
   fail('canvas file IPC must enforce the bound workspace boundary')
 } else ok('canvas file IPC enforces the bound workspace boundary')
