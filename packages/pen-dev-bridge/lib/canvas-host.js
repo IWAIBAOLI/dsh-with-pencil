@@ -51,18 +51,29 @@ export function registerCanvasHost({ ctx, sub, mcpBin, headless }) {
       binding.saveWaiters.push(waiter)
     })
   }
+  function rejectSaveWaiters(binding, error) {
+    for (const waiter of binding.saveWaiters.splice(0)) {
+      clearTimeout(waiter.timer)
+      waiter.reject(error)
+    }
+  }
   async function inspectCanvasFile(target) {
     const content = await fsp.readFile(target, 'utf8')
     const document = validateDocument(content)
     return { bytes: Buffer.byteLength(content), children: document.children.length }
   }
-  async function saveCanvas(binding) {
+  async function saveCanvas(binding, options = {}) {
     if (!binding.initialized || binding.loadedFile !== binding.currentFile) {
       throw new Error('canvas document is not ready to save')
     }
     if (binding.conflict) throw new Error('the .pen file changed on disk; resolve the canvas conflict before saving')
-    if (!binding.dirty) {
-      try { return await inspectCanvasFile(binding.currentFile) }
+    const target = options.target || binding.currentFile
+    if (!options.force && !binding.dirty) {
+      try {
+        const inspected = await inspectCanvasFile(target)
+        binding.saveError = null
+        return inspected
+      }
       catch (err) {
         if (err && err.code === 'ENOENT') return { bytes: 0, children: 0, skipped: true }
         throw err
@@ -70,13 +81,22 @@ export function registerCanvasHost({ ctx, sub, mcpBin, headless }) {
     }
     const revision = binding.saveRevision
     binding.saveRequested = true
+    binding.saveTarget = target
+    binding.saveExclusive = !!options.exclusive
+    binding.saveError = null
     try {
       await transport.request(binding, 'save-document', {}, 20000)
+      if (binding.saveError) throw new Error(binding.saveError)
       await waitForCanvasSave(binding, revision)
+    } catch (error) {
+      binding.saveError = error && error.message ? error.message : String(error)
+      throw error
     } finally {
       binding.saveRequested = false
+      binding.saveTarget = null
+      binding.saveExclusive = false
     }
-    return inspectCanvasFile(binding.currentFile)
+    return inspectCanvasFile(target)
   }
   function enqueueCanvas(binding, run) {
     const operation = binding.serial.then(run, run)
@@ -114,6 +134,16 @@ export function registerCanvasHost({ ctx, sub, mcpBin, headless }) {
       await fsp.rename(temporary, target)
     } finally {
       try { await fsp.unlink(temporary) } catch (err) { /* rename already removed it */ }
+    }
+  }
+  async function writeFileAtomicNew(target, content) {
+    await fsp.mkdir(path.dirname(target), { recursive: true })
+    const temporary = target + '.penhost-' + randomUUID() + '.tmp'
+    try {
+      await fsp.writeFile(temporary, content, { flag: 'wx' })
+      await fsp.link(temporary, target)
+    } finally {
+      try { await fsp.unlink(temporary) } catch (error) { /* linked content survives */ }
     }
   }
   function validateDocument(content) {
@@ -171,6 +201,7 @@ export function registerCanvasHost({ ctx, sub, mcpBin, headless }) {
     binding.loadedFile = target
     binding.dirty = false
     binding.conflict = null
+    binding.saveError = null
     binding.autosaveAfter = Date.now() + 6000
     resources.rememberDocument(binding, target, content)
     transport.notify(binding, 'file-update', {
@@ -214,6 +245,12 @@ export function registerCanvasHost({ ctx, sub, mcpBin, headless }) {
     if (requestedCwd && liveCwd !== requestedCwd) {
       res.writeHead(409); res.end('workspace does not match the conversation'); return
     }
+    try { editorAssets.preflight() }
+    catch (error) {
+      res.writeHead(503)
+      res.end('pen.dev editor is unavailable: ' + (error && error.message ? error.message : String(error)))
+      return
+    }
     const workspace = liveCwd
     try { await headless.releaseSession(sessionId) }
     catch (err) { res.writeHead(409); res.end('failed to hand off headless document: ' + err.message); return }
@@ -233,7 +270,8 @@ export function registerCanvasHost({ ctx, sub, mcpBin, headless }) {
       queue: [], pollWaiters: [], pendingRequests: new Map(), saveRevision: 0,
       saveWaiters: [], saveRequested: false, dirty: false, initialized: false, lastSeen: 0,
       serial: Promise.resolve(), conflict: null, documentFingerprint: null, documentWatcher: null,
-      resourceWatchers: new Map(), onExternalDocumentChange: null,
+      resourceWatchers: new Map(), onExternalDocumentChange: null, saveError: null,
+      saveTarget: null, saveExclusive: false,
     }
     binding.onExternalDocumentChange = (change) => handleExternalDocumentChange(binding, change)
     bindings.set(key, binding)
@@ -303,6 +341,7 @@ export function registerCanvasHost({ ctx, sub, mcpBin, headless }) {
         binding.currentFile = target
         binding.loadedFile = null
         binding.conflict = null
+        binding.saveError = null
         binding.autosaveAfter = Infinity
         await queueCurrentFile(binding)
         if (binding.loadedFile !== target) throw new Error('canvas refused to load ' + target)
@@ -311,6 +350,61 @@ export function registerCanvasHost({ ctx, sub, mcpBin, headless }) {
     catch (err) { res.writeHead(500); res.end(err.message); return }
     res.writeHead(200, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify({ file: target }))
+  }
+  async function handleSave(req, res) {
+    const binding = bindingOf(req)
+    if (!binding) { res.writeHead(401); res.end('invalid canvas binding'); return }
+    try {
+      const persisted = await enqueueCanvas(binding, () => saveCanvas(binding))
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ ok: true, file: binding.currentFile, persisted }))
+    } catch (error) {
+      res.writeHead(409); res.end(error && error.message ? error.message : String(error))
+    }
+  }
+  async function handleSaveAs(req, res) {
+    const binding = bindingOf(req)
+    if (!binding) { res.writeHead(401); res.end('invalid canvas binding'); return }
+    let body
+    try { body = await readBody(req) }
+    catch (error) { res.writeHead(400); res.end('bad json'); return }
+    let target
+    try { target = insideWorkspace(binding, body.file) }
+    catch (error) { res.writeHead(403); res.end(error.message); return }
+    if (path.extname(target).toLowerCase() !== '.pen') {
+      res.writeHead(400); res.end('canvas file must end in .pen'); return
+    }
+    if (target === binding.currentFile) {
+      res.writeHead(409); res.end('choose a different filename for Save As'); return
+    }
+    try {
+      await enqueueCanvas(binding, async () => {
+        try { await fsp.access(target); throw new Error('the Save As target already exists') }
+        catch (error) { if (!error || error.code !== 'ENOENT') throw error }
+        await saveCanvas(binding, { target, force: true, exclusive: true })
+        const content = await fsp.readFile(target, 'utf8')
+        validateDocument(content)
+        resources.stopDocumentWatcher(binding)
+        binding.currentFile = target
+        binding.loadedFile = target
+        binding.conflict = null
+        binding.saveError = null
+        binding.dirty = false
+        binding.autosaveAfter = Date.now() + 6000
+        resources.rememberDocument(binding, target, content)
+        transport.notify(binding, 'file-update', {
+          fileURI: pathToFileURL(target).toString(),
+          content,
+          zoomToFit: false,
+          isDirty: false,
+          displayName: path.basename(target),
+        })
+      })
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ ok: true, file: target }))
+    } catch (error) {
+      res.writeHead(409); res.end(error && error.message ? error.message : String(error))
+    }
   }
   async function handleConflict(req, res) {
     const binding = bindingOf(req)
@@ -326,6 +420,7 @@ export function registerCanvasHost({ ctx, sub, mcpBin, headless }) {
           const content = await fsp.readFile(binding.currentFile, 'utf8')
           validateDocument(content)
           binding.conflict = null
+          binding.saveError = null
           binding.dirty = false
           binding.loadedFile = binding.currentFile
           binding.autosaveAfter = Date.now() + 6000
@@ -404,6 +499,7 @@ export function registerCanvasHost({ ctx, sub, mcpBin, headless }) {
           binding.currentFile = insideWorkspace(binding, uri)
           binding.loadedFile = null
           binding.conflict = null
+          binding.saveError = null
           binding.autosaveAfter = Infinity
         }
         catch (err) { res.writeHead(403); res.end('forbidden'); return }
@@ -421,12 +517,14 @@ export function registerCanvasHost({ ctx, sub, mcpBin, headless }) {
       } else if (msg.method === 'save-resource') {
         if (!binding.conflict && binding.currentFile && binding.loadedFile === binding.currentFile && (binding.saveRequested || Date.now() >= binding.autosaveAfter) && msg.payload && msg.payload.content !== undefined) {
           try {
-            const target = insideWorkspace(binding, binding.currentFile)
+            const target = insideWorkspace(binding, binding.saveTarget || binding.currentFile)
             const content = String(msg.payload.content)
             validateDocument(content)
-            await writeFileAtomic(target, content)
-            resources.rememberDocument(binding, target, content)
+            if (binding.saveExclusive) await writeFileAtomicNew(target, content)
+            else await writeFileAtomic(target, content)
+            if (target === binding.currentFile) resources.rememberDocument(binding, target, content)
             binding.dirty = false
+            binding.saveError = null
             binding.saveRevision += 1
             for (const waiter of binding.saveWaiters.slice()) {
               if (binding.saveRevision <= waiter.revision) continue
@@ -434,7 +532,11 @@ export function registerCanvasHost({ ctx, sub, mcpBin, headless }) {
               binding.saveWaiters.splice(binding.saveWaiters.indexOf(waiter), 1)
               waiter.resolve()
             }
-          } catch (err) { console.error('[pen-dev-bridge] save failed', err && err.message) }
+          } catch (error) {
+            binding.saveError = error && error.message ? error.message : String(error)
+            rejectSaveWaiters(binding, error)
+            console.error('[pen-dev-bridge] save failed', binding.saveError)
+          }
         }
       }
       res.writeHead(200); res.end('{}')
@@ -512,6 +614,7 @@ export function registerCanvasHost({ ctx, sub, mcpBin, headless }) {
     if (binding.initialized && binding.loadedFile === binding.currentFile) await saveCanvas(binding)
     binding.currentFile = target
     binding.loadedFile = null
+    binding.saveError = null
     binding.autosaveAfter = Infinity
     await queueCurrentFile(binding)
     if (binding.loadedFile !== target) throw new Error('canvas refused to load ' + target)
@@ -633,6 +736,8 @@ export function registerCanvasHost({ ctx, sub, mcpBin, headless }) {
   routeDisposers.push(webServer.register({ kind: 'exact', path: '/pen-host/unbind', handler: handleUnbind }))
   routeDisposers.push(webServer.register({ kind: 'exact', path: '/pen-host/files', handler: handleFiles }))
   routeDisposers.push(webServer.register({ kind: 'exact', path: '/pen-host/file', handler: handleFile }))
+  routeDisposers.push(webServer.register({ kind: 'exact', path: '/pen-host/save', handler: handleSave }))
+  routeDisposers.push(webServer.register({ kind: 'exact', path: '/pen-host/save-as', handler: handleSaveAs }))
   routeDisposers.push(webServer.register({ kind: 'exact', path: '/pen-host/conflict', handler: handleConflict }))
   routeDisposers.push(webServer.register({ kind: 'exact', path: '/pen-host/reveal', handler: handleReveal }))
   routeDisposers.push(webServer.register({ kind: 'exact', path: '/pen-host/ipc', handler: handleIpc }))
@@ -649,6 +754,7 @@ export function registerCanvasHost({ ctx, sub, mcpBin, headless }) {
       file: binding.currentFile,
       connected: binding.initialized && Date.now() - binding.lastSeen < 30000,
       conflict: binding.conflict,
+      saveError: binding.saveError,
     }))
   } }))
   routeDisposers.push(webServer.register({ kind: 'exact', path: '/pen-session-token', handler: async (req, res) => {
@@ -657,8 +763,13 @@ export function registerCanvasHost({ ctx, sub, mcpBin, headless }) {
     res.end(JSON.stringify({ token: sessionStore.token() }))
   } }))
   for (const d of routeDisposers) if (d) ctx.effect(() => d)
-  ctx.effect(() => () => {
+  ctx.effect(() => async () => {
     headless.setCanvasBridge(null)
+    await Promise.all([...bindings.values()].map((binding) => enqueueCanvas(binding, async () => {
+      if (!binding.initialized || binding.loadedFile !== binding.currentFile || !binding.dirty || binding.conflict) return
+      try { await saveCanvas(binding) }
+      catch (error) { console.warn('[pen-dev-bridge] final canvas save failed:', error && error.message) }
+    })))
     for (const binding of [...bindings.values()]) releaseBinding(binding, new Error('pen.dev canvas bridge stopped'))
     bindingsBySession.clear()
   })

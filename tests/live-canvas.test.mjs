@@ -19,6 +19,10 @@ process.env.DSH_PEN_MCP_BIN = '/test/pen-mcp'
 
 const bridgeUrl = new URL('../packages/pen-dev-bridge/lib/index.js', import.meta.url)
 const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'pen-live-canvas-'))
+const editorDir = path.join(workspace, 'editor-out')
+fs.mkdirSync(editorDir, { recursive: true })
+fs.writeFileSync(path.join(editorDir, 'index.html'), '<html><body><script type="module" src="/assets/editor.js"></script></body></html>')
+process.env.DSH_PEN_EDITOR_DIR = editorDir
 const tools = new Map()
 const routes = new Map()
 const cleanups = []
@@ -100,6 +104,7 @@ let liveDocument = { version: '2.14', children: [], fileToken: 'canvas-test' }
 let liveFile = path.join(workspace, 'designs', 'design.pen')
 let canvasMutations = 0
 let selectedElements = []
+let invalidNextSave = false
 let pauseAfterBatch = false
 let pausedResolve
 let resumeResolve
@@ -144,7 +149,9 @@ async function fakeEditor() {
         canvasMutations += 1
         await postIpc({ id: message.id, type: 'response', method: message.method, payload: { success: true, result: { message: 'Created ' + match[2] + ' on visible canvas' } } })
       } else if (message.method === 'save-document') {
-        await postIpc({ id: 'save-' + Date.now(), type: 'notification', method: 'save-resource', payload: { content: JSON.stringify(liveDocument) } })
+        const content = invalidNextSave ? '{"version":"broken"}' : JSON.stringify(liveDocument)
+        invalidNextSave = false
+        await postIpc({ id: 'save-' + Date.now(), type: 'notification', method: 'save-resource', payload: { content } })
         await postIpc({ id: message.id, type: 'response', method: message.method, payload: {} })
       } else if (message.method === 'get-screenshot') {
         await postIpc({ id: message.id, type: 'response', method: message.method, payload: { success: true, result: { image: 'iVBORw0KGgo=', mimeType: 'image/png' } } })
@@ -294,10 +301,32 @@ try {
   assert.equal(canvasMutations, 3)
   assert.equal(liveFile, path.join(workspace, 'one.pen'))
 
+  liveDocument.children.push({ id: 'retry-save', type: 'frame', name: 'RetrySaved' })
+  await postIpc({ id: 'dirty-failed-save', type: 'notification', method: 'file-changed', payload: {} })
+  invalidNextSave = true
+  const failedSave = await http('/pen-host/save', { method: 'POST', query })
+  assert.equal(failedSave.status, 409)
+  assert.match((await http('/pen-host/state', { query })).json().saveError, /Unsupported \.pen format/)
+  const retriedSave = await http('/pen-host/save', { method: 'POST', query })
+  assert.equal(retriedSave.status, 200, retriedSave.text)
+  assert.equal((await http('/pen-host/state', { query })).json().saveError, null)
+  assert.deepEqual(diskState('one.pen').names, ['DiskWins', 'LocalWins', 'RetrySaved'])
+
+  liveDocument.children.push({ id: 'save-as-only', type: 'frame', name: 'SaveAsOnly' })
+  await postIpc({ id: 'dirty-save-as', type: 'notification', method: 'file-changed', payload: {} })
+  const savedAs = await http('/pen-host/save-as', { method: 'POST', query, body: { file: 'variants/final.pen' } })
+  assert.equal(savedAs.status, 200, savedAs.text)
+  await waitFor(() => liveFile === path.join(workspace, 'variants', 'final.pen'))
+  assert.deepEqual(diskState('one.pen').names, ['DiskWins', 'LocalWins', 'RetrySaved'])
+  assert.deepEqual(diskState('variants/final.pen').names, ['DiskWins', 'LocalWins', 'RetrySaved', 'SaveAsOnly'])
+  const refusedOverwrite = await http('/pen-host/save-as', { method: 'POST', query, body: { file: 'one.pen' } })
+  assert.equal(refusedOverwrite.status, 409)
+  assert.match(refusedOverwrite.text, /already exists/)
+
   await postIpc({ id: 'make-library', type: 'notification', method: 'turn-into-library', payload: {} })
-  await waitFor(async () => (await http('/pen-host/state', { query })).json().file.endsWith('one.lib.pen'))
-  assert.equal(fs.existsSync(path.join(workspace, 'one.pen')), false)
-  assert.deepEqual(diskState('one.lib.pen').names, ['DiskWins', 'LocalWins'])
+  await waitFor(async () => (await http('/pen-host/state', { query })).json().file.endsWith('final.lib.pen'))
+  assert.equal(fs.existsSync(path.join(workspace, 'variants', 'final.pen')), false)
+  assert.deepEqual(diskState('variants/final.lib.pen').names, ['DiskWins', 'LocalWins', 'RetrySaved', 'SaveAsOnly'])
 
   running = false
   const unbound = await http('/pen-host/unbind', { method: 'POST', query })
@@ -310,5 +339,6 @@ try {
   if (resumeResolve) resumeResolve()
   for (const cleanup of cleanups.reverse()) await cleanup()
   await editorLoop.catch((error) => { if (running) throw error })
+  delete process.env.DSH_PEN_EDITOR_DIR
   fs.rmSync(workspace, { recursive: true, force: true })
 }

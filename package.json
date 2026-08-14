@@ -1,0 +1,14 @@
+{
+  "name": "pen-dev-bridge-workspace",
+  "private": true,
+  "version": "0.5.0",
+  "description": "Development workspace for the DeepSeek Harness pen.dev bridge.",
+  "engines": {
+    "node": ">=22.15.0"
+  },
+  "scripts": {
+    "pack:check": "node scripts/pack-check.cjs",
+    "verify": "node scripts/verify.cjs",
+    "test": "node scripts/test-all.cjs"
+  }
+}

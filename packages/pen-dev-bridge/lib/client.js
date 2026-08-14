@@ -38,6 +38,7 @@ window.__ModuleLoader__.load({
 .dsh-penhost-mode:hover { border-color: var(--dsw-alias-brand-primary, #4f7cff); }
 .dsh-penhost-conflict { color: #ffb454; border-color: #ffb454; white-space: nowrap; }
 .dsh-penhost-conflict-menu { left: auto; right: 0; width: 310px; }
+.dsh-penhost-save-error { color: #ff8f8f; border-color: #ff8f8f; white-space: nowrap; }
 .dsh-penhost-danger { color: #ff8f8f; }
 .dsh-penhost-close { margin-left: auto; border: none; background: transparent; color: var(--dsw-alias-label-secondary, #9aa0b4); cursor: pointer; font-size: 13px; padding: 2px 8px; border-radius: 6px; }
 .dsh-penhost-close:hover { background: rgba(255,255,255,.08); color: var(--dsw-alias-label-primary, #eee); }
@@ -59,7 +60,7 @@ html[data-penhost-pointer="drag"], html[data-penhost-pointer="drag"] * { cursor:
 `
 
 		const DEFAULT_SPLIT_RATIO = 0.42
-		const EMPTY_SESSION = Object.freeze({ open: false, mode: 'split', ratio: DEFAULT_SPLIT_RATIO, pos: null, binding: null, workspace: null, file: null, conflict: null, loading: false, error: null })
+		const EMPTY_SESSION = Object.freeze({ open: false, mode: 'split', ratio: DEFAULT_SPLIT_RATIO, pos: null, binding: null, workspace: null, file: null, conflict: null, saveError: null, loading: false, error: null })
 
 		function insertStyles() {
 			if (typeof document === 'undefined') return () => {}
@@ -118,6 +119,8 @@ html[data-penhost-pointer="drag"], html[data-penhost-pointer="drag"] * { cursor:
 					binding: result.binding,
 					workspace: result.workspace,
 					file: result.file,
+					conflict: null,
+					saveError: null,
 					loading: false,
 					open: true,
 					error: null,
@@ -181,6 +184,7 @@ html[data-penhost-pointer="drag"], html[data-penhost-pointer="drag"] * { cursor:
 			const menusRef = React.useRef(null)
 			const fileMenuRef = React.useRef(null)
 			const conflictMenuRef = React.useRef(null)
+			const saveErrorMenuRef = React.useRef(null)
 			const [menu, setMenu] = React.useState(null)
 			const [files, setFiles] = React.useState([])
 			const [filesLoading, setFilesLoading] = React.useState(false)
@@ -233,7 +237,8 @@ html[data-penhost-pointer="drag"], html[data-penhost-pointer="drag"] * { cursor:
 					const inWorkspace = menusRef.current && menusRef.current.contains(event.target)
 					const inFile = fileMenuRef.current && fileMenuRef.current.contains(event.target)
 					const inConflict = conflictMenuRef.current && conflictMenuRef.current.contains(event.target)
-					if (!inWorkspace && !inFile && !inConflict) setMenu(null)
+					const inSaveError = saveErrorMenuRef.current && saveErrorMenuRef.current.contains(event.target)
+					if (!inWorkspace && !inFile && !inConflict && !inSaveError) setMenu(null)
 				}
 				window.addEventListener('pointerdown', onOutside, true)
 				return () => window.removeEventListener('pointerdown', onOutside, true)
@@ -248,8 +253,8 @@ html[data-penhost-pointer="drag"], html[data-penhost-pointer="drag"] * { cursor:
 						if (!response.ok) return
 						const result = await response.json()
 						const current = store.getSnapshot().sessions[sessionId] || EMPTY_SESSION
-						if (!disposed && (result.file !== current.file || (result.conflict || null) !== (current.conflict || null))) {
-							store.patch(sessionId, { file: result.file || current.file, conflict: result.conflict || null })
+						if (!disposed && (result.file !== current.file || (result.conflict || null) !== (current.conflict || null) || (result.saveError || null) !== (current.saveError || null))) {
+							store.patch(sessionId, { file: result.file || current.file, conflict: result.conflict || null, saveError: result.saveError || null })
 						}
 					} catch (error) { /* host may be restarting */ }
 				}
@@ -323,7 +328,7 @@ html[data-penhost-pointer="drag"], html[data-penhost-pointer="drag"] * { cursor:
 					})
 					if (!response.ok) throw new Error((await response.text()) || ('HTTP ' + response.status))
 					const result = await response.json()
-					store.patch(sessionId, { file: result.file, error: null })
+					store.patch(sessionId, { file: result.file, conflict: null, saveError: null, error: null })
 					setMenu(null)
 				} catch (error) { setMenuError(error && error.message ? error.message : String(error)) }
 			}
@@ -348,6 +353,36 @@ html[data-penhost-pointer="drag"], html[data-penhost-pointer="drag"] * { cursor:
 				if (!file) return
 				if (!file.toLowerCase().endsWith('.pen')) file += '.pen'
 				void switchFile(file)
+			}
+
+			const saveAs = async () => {
+				const current = workspaceRelative(state.workspace, state.file) || 'designs/design.pen'
+				const suggested = current.replace(/\.pen$/i, '-copy.pen')
+				let file = window.prompt('另存为（相对于当前工作区，不会覆盖已有文件）', suggested)
+				if (file === null) return
+				file = String(file).trim()
+				if (!file) return
+				if (!file.toLowerCase().endsWith('.pen')) file += '.pen'
+				setMenuError(null)
+				try {
+					const response = await fetch('/pen-host/save-as?binding=' + encodeURIComponent(state.binding), {
+						method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ file }),
+					})
+					if (!response.ok) throw new Error((await response.text()) || ('HTTP ' + response.status))
+					const result = await response.json()
+					store.patch(sessionId, { file: result.file, conflict: null, saveError: null, error: null })
+					setMenu(null)
+				} catch (error) { setMenuError(error && error.message ? error.message : String(error)) }
+			}
+
+			const retrySave = async () => {
+				setMenuError(null)
+				try {
+					const response = await fetch('/pen-host/save?binding=' + encodeURIComponent(state.binding), { method: 'POST' })
+					if (!response.ok) throw new Error((await response.text()) || ('HTTP ' + response.status))
+					store.patch(sessionId, { saveError: null })
+					setMenu(null)
+				} catch (error) { setMenuError(error && error.message ? error.message : String(error)) }
 			}
 
 			const isSplit = state.mode === 'split'
@@ -384,6 +419,7 @@ html[data-penhost-pointer="drag"], html[data-penhost-pointer="drag"] * { cursor:
 						}, currentFile || '选择 .pen 文件'),
 						menu === 'file' ? React.createElement('div', { className: 'dsh-penhost-menu', role: 'menu' },
 							React.createElement('button', { className: 'dsh-penhost-menu-item', role: 'menuitem', onClick: createFile }, '新建 .pen 文件…'),
+							React.createElement('button', { className: 'dsh-penhost-menu-item', role: 'menuitem', onClick: () => { void saveAs() } }, '另存为…'),
 							React.createElement('div', { className: 'dsh-penhost-menu-sep' }),
 							filesLoading ? React.createElement('div', { className: 'dsh-penhost-menu-note' }, '正在查找 .pen 文件…') : null,
 							!filesLoading && !visibleFiles.length ? React.createElement('div', { className: 'dsh-penhost-menu-note' }, '工作区内没有 .pen 文件') : null,
@@ -402,6 +438,16 @@ html[data-penhost-pointer="drag"], html[data-penhost-pointer="drag"] * { cursor:
 							React.createElement('div', { className: 'dsh-penhost-menu-sep' }),
 							React.createElement('button', { className: 'dsh-penhost-menu-item', role: 'menuitem', onClick: () => { void resolveConflict('reload') } }, '重新加载磁盘版本'),
 							React.createElement('button', { className: 'dsh-penhost-menu-item dsh-penhost-danger', role: 'menuitem', onClick: () => { void resolveConflict('overwrite') } }, '保留画布并覆盖磁盘'),
+							menuError ? React.createElement('div', { className: 'dsh-penhost-menu-note' }, menuError) : null) : null) : null,
+					state.saveError ? React.createElement('div', { className: 'dsh-penhost-menu-wrap', ref: saveErrorMenuRef, onPointerDown: (event) => event.stopPropagation() },
+						React.createElement('button', {
+							className: 'dsh-penhost-mode dsh-penhost-save-error', title: state.saveError, 'aria-haspopup': 'menu', 'aria-expanded': menu === 'save-error',
+							onClick: () => { setMenu(menu === 'save-error' ? null : 'save-error'); setMenuError(null) },
+						}, '保存失败'),
+						menu === 'save-error' ? React.createElement('div', { className: 'dsh-penhost-menu dsh-penhost-conflict-menu', role: 'menu' },
+							React.createElement('div', { className: 'dsh-penhost-menu-note' }, state.saveError),
+							React.createElement('div', { className: 'dsh-penhost-menu-sep' }),
+							React.createElement('button', { className: 'dsh-penhost-menu-item', role: 'menuitem', onClick: () => { void retrySave() } }, '重试保存'),
 							menuError ? React.createElement('div', { className: 'dsh-penhost-menu-note' }, menuError) : null) : null) : null,
 					React.createElement('button', {
 						className: 'dsh-penhost-mode',

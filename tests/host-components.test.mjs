@@ -32,6 +32,7 @@ try {
     bindingOf(req) { return new URL(req.url, 'http://127.0.0.1').searchParams.get('binding') === binding.key ? binding : undefined },
     urlOf(req) { return new URL(req.url, 'http://127.0.0.1') },
   })
+  assert.equal(assets.preflight().directory, editorDir)
 
   const indexResponse = response()
   await assets.serve({ url: '/pen-editor/index.html?binding=binding-token' }, indexResponse)

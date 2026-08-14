@@ -147,6 +147,15 @@ __penPoll();
     return rawIndex
   }
 
+  function preflight() {
+    const directory = editorDirectory()
+    const html = editorIndex()
+    if (!html.includes('<script type="module"')) {
+      throw new Error('pen-editor index.html is incompatible: module entrypoint not found')
+    }
+    return { directory }
+  }
+
   async function serve(req, res) {
     const pathname = urlOf(req).pathname
     const relative = pathname.slice('/pen-editor'.length) || '/index.html'
@@ -184,5 +193,5 @@ __penPoll();
     }
   }
 
-  return { serve }
+  return { preflight, serve }
 }

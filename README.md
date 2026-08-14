@@ -116,11 +116,15 @@ pen.dev 的授权，因此目前不会把官方 dist 直接提交进本仓库。
   的 `.pen` 文件。
 - editor iframe 在当前会话中保持挂载，Agent 切换文件时不会因 React 重建 iframe 而丢引擎。
 - 用户手工编辑每 6 秒触发保存；Agent 编辑则逐次等待保存确认。
+- 文件菜单支持“另存为”：保存当前内存文档到工作区内的新 `.pen`，拒绝覆盖已有文件并自动切换；
+  原文件保持不变。
 - 从画布导入的图片和 Figma 内嵌图片保存到当前设计旁的 `images/`；SVG 由官方 editor 转成节点；
   生成图片同样持久化到 `images/`，不会只存在于引擎内存。
 - 工作区内的 `*.lib.pen` 和官方 CLI 随附的只读设计库会出现在 editor 的设计库列表；当前普通
   `.pen` 文件也可通过官方 editor 菜单转换为不覆盖已有文件的 `.lib.pen`。
 - 外部文件冲突会在顶栏显示“磁盘冲突”，自动保存与 editor 主动保存都会暂停，直到明确选择版本。
+- 磁盘保存失败会在顶栏显示并允许重试；正常插件退出会在释放会话前并行冲洗仍有修改的画布。
+- 绑定会话前先检查官方 editor 资源；资源缺失或入口不兼容时直接返回明确错误，不再打开空白 iframe。
 - 截图会保存为 Harness attachment，并向模型返回真正的 image block，而不是 base64 文本提示。
 - 工具取消后，尚未交付 editor 的请求会从队列删除；已经交付的请求会明确提示先检查画布状态，
   避免盲目重试造成重复编辑。
@@ -128,14 +132,14 @@ pen.dev 的授权，因此目前不会把官方 dist 直接提交进本仓库。
 ## 验证
 
 ```bash
-node scripts/verify.cjs
-node tests/host-components.test.mjs
-node tests/workspace-path.test.mjs
-node tests/workspace-resources.test.mjs
-node tests/live-canvas.test.mjs
+npm test
 ```
 
 `live-canvas.test.mjs` 模拟真实 Agent 工具调用和官方 editor IPC：连续编辑、选区上下文、原子保存、
 外部热重载与两种冲突决议、切换并重开文件、截图附件、取消请求和解绑会话，并确认整个 live
 canvas 路径没有启动 headless 子进程。`workspace-resources.test.mjs` 另外覆盖图片/SVG/Figma 资源
 落盘、生成图片、Script 文件监听、工作区/内置设计库和嵌套二进制 IPC。
+
+测试不依赖本机已经安装的 editor bundle，并在 CI 中覆盖 Node 22/24 的 macOS 与 Linux。正式发布
+仍应另外从生成的 npm tarball 安装到一个全新 DSH profile；在确认 npm scope 和 pen.dev 官方资源
+使用边界之前，发布包继续保持 `private` 且不包含任何 CLI/editor 官方文件。

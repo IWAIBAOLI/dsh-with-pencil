@@ -209,7 +209,7 @@ try {
   if (!client.includes('setPointerCapture(pointerId)') || !client.includes('html[data-penhost-pointer] .dsh-penhost-frame { pointer-events: none')) {
     fail('canvas resize/drag must keep pointer ownership across the editor iframe')
   } else ok('canvas resize/drag keeps pointer ownership across the editor iframe')
-  if (!client.includes('打开工作区文件夹') || !client.includes('新建 .pen 文件') || client.includes('当前会话 · 右侧分屏 · 自动保存')) {
+  if (!client.includes('打开工作区文件夹') || !client.includes('新建 .pen 文件') || !client.includes('另存为…') || client.includes('当前会话 · 右侧分屏 · 自动保存')) {
     fail('canvas toolbar must expose concise workspace/file controls')
   } else ok('canvas toolbar exposes concise workspace/file controls')
   if (!client.includes('DEFAULT_SPLIT_RATIO = 0.42') || !client.includes('ratio: width / viewport') || !client.includes('setViewportWidth(viewport)') || client.includes('wide: width')) {
@@ -241,7 +241,7 @@ if (!editorAssetsSource.includes('function __penEncodeValue(value)') || !editorA
 if (!canvasHostSource.includes("const EDITOR_SCHEMA_VERSION = '2.14'") || !canvasHostSource.includes('document.version !== EDITOR_SCHEMA_VERSION') || !canvasHostSource.includes('async function queueCurrentFile(binding)') || !canvasHostSource.includes("msg.method === 'initialized'") || !canvasHostSource.includes("transport.notify(binding, 'file-update'")) {
   fail('host must push the selected document after the editor initializes')
 } else ok('host pushes the selected document after editor initialization')
-if (!canvasHostSource.includes('binding.loadedFile !== binding.currentFile') || !canvasHostSource.includes('(binding.saveRequested || Date.now() >= binding.autosaveAfter)') || !canvasHostSource.includes('async function saveCanvas(binding)') || !canvasHostSource.includes('writeFileAtomic')) {
+if (!canvasHostSource.includes('binding.loadedFile !== binding.currentFile') || !canvasHostSource.includes('(binding.saveRequested || Date.now() >= binding.autosaveAfter)') || !canvasHostSource.includes('async function saveCanvas(binding, options = {})') || !canvasHostSource.includes('writeFileAtomic')) {
   fail('autosave must wait for a successful file load and write atomically')
 } else ok('autosave waits for a successful file load and writes atomically')
 if (!canvasHostSource.includes("execute: 'batch-design'") || !headlessSource.includes('return canvasBridge.run(tool') || !canvasHostSource.includes("Saved by live canvas:") || !canvasHostSource.includes('transport.request(binding')) {
@@ -286,6 +286,15 @@ if (!workspaceResourcesSource.includes('fs.watchFile(target') || !canvasHostSour
 if (!workspaceResourcesSource.includes('async function importFiles') || !workspaceResourcesSource.includes('async function saveGeneratedImage') || !workspaceResourcesSource.includes('async function findLibraries') || !workspaceResourcesSource.includes("endsWith('.lib.pen')")) {
   fail('workspace resources must support binary imports, generated images, and design libraries')
 } else ok('workspace resources support binary imports, generated images, and design libraries')
+if (!canvasHostSource.includes("path: '/pen-host/save-as'") || !canvasHostSource.includes('writeFileAtomicNew') || !canvasHostSource.includes('the Save As target already exists')) {
+  fail('Save As must persist an exclusive workspace copy and switch the canvas')
+} else ok('Save As persists an exclusive workspace copy and switches the canvas')
+if (!editorAssetsSource.includes('function preflight()') || !canvasHostSource.includes('editorAssets.preflight()')) {
+  fail('canvas binding must reject missing or incompatible editor assets before handoff')
+} else ok('canvas binding preflights editor assets before handoff')
+if (!canvasHostSource.includes('saveError: binding.saveError') || !canvasHostSource.includes('rejectSaveWaiters(binding, error)') || !canvasHostSource.includes('ctx.effect(() => async () =>')) {
+  fail('save failures must be observable and dirty canvases flushed during async shutdown')
+} else ok('save failures are observable and dirty canvases flush during async shutdown')
 
 console.log('[4d] module boundaries')
 if (!pluginSource.includes('createHeadlessRuntime') || !pluginSource.includes('registerModelTools') || !pluginSource.includes('registerCanvasHost')) {
