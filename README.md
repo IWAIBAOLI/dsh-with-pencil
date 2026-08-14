@@ -82,10 +82,14 @@ scripts/verify.cjs          包结构和关键约束检查
 3. 把仓库根目录作为本地 Bundle 安装到目标 DSH profile：
 
    ```bash
-   dsh plugin --profile web add link:/absolute/path/to/pen-dev-bridge
+   dsh plugin --profile web add file:/absolute/path/to/pen-dev-bridge
    ```
 
 4. 重启 DSH。该 Bundle 会安装固定版本的官方 `@pen.dev/cli`，并同时加载 Host 和 Browser Client。
+
+这里有意使用 `file:` 而不是 `link:`：前者会在 profile 内生成完整依赖树；后者要求源码目录自己
+已经安装全部 runtime/peer dependencies。若从旧的双包开发版迁移，先运行
+`dsh plugin --profile web remove pen-dev-bridge-bundle`，再执行上面的单包安装命令。
 
 也可以直接在仓库内安装示例 profile 的依赖进行开发验证，但不要把下面命令理解为发行安装器：
 
