@@ -13,6 +13,8 @@ All notable changes to this project are documented here. Versions follow
 - Add a user-facing export menu backed directly by the live official editor:
   selected nodes (or all top-level nodes) export to workspace-safe 2× PNG or
   PDF files, with an action to reveal the output folder.
+- Match dropdown surfaces, borders, shadows, hover states, and compact spacing
+  to the resolved Harness menu theme in both light and dark mode.
 
 ## 0.5.0-beta.3 - 2026-08-15
 

@@ -221,6 +221,9 @@ try {
   if (!client.includes('打开工作区文件夹') || !client.includes('新建 .pen 文件') || !client.includes('另存为…') || !client.includes('导出 PNG（2×）') || !client.includes('导出 PDF') || client.includes('当前会话 · 右侧分屏 · 自动保存')) {
     fail('canvas toolbar must expose concise workspace/file controls')
   } else ok('canvas toolbar exposes concise workspace/file controls')
+  if (!client.includes('var(--dsw-specific-menu') || !client.includes('var(--dsw-shadow-lv3') || !client.includes('var(--dsw-alias-interactive-bg-hover') || client.includes('0 12px 32px rgba(0,0,0,.42)')) {
+    fail('canvas dropdowns must use the resolved Harness menu surface and elevation tokens')
+  } else ok('canvas dropdowns use the resolved Harness menu surface and elevation tokens')
   if (!client.includes('DEFAULT_SPLIT_RATIO = 0.42') || !client.includes('ratio: width / viewport') || !client.includes('setViewportWidth(viewport)') || client.includes('wide: width')) {
     fail('split canvas width must default smaller and follow viewport ratio')
   } else ok('split canvas defaults to 42% and follows viewport ratio')
