@@ -1,9 +1,17 @@
 {
   "name": "dsh-with-pencil",
-  "private": true,
+  "private": false,
   "version": "0.5.0-beta.1",
   "description": "Session-aware Pencil integration for DeepSeek Harness with official MCP tools and an on-demand browser canvas.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/IWAIBAOLI/dsh-with-pencil.git"
+  },
+  "bugs": {
+    "url": "https://github.com/IWAIBAOLI/dsh-with-pencil/issues"
+  },
+  "homepage": "https://github.com/IWAIBAOLI/dsh-with-pencil#readme",
   "type": "module",
   "main": "./lib/index.js",
   "exports": {
