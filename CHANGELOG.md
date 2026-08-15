@@ -4,6 +4,22 @@ All notable changes to this project are documented here. Versions follow
 [Semantic Versioning](https://semver.org/); prereleases are published under the
 `beta` npm dist-tag.
 
+## 0.5.0-beta.5 - 2026-08-15
+
+- Align the `pencil_mcp_execute` tool description with the headless engine's
+  real snippet API: only `Update`, `Insert`, `Copy`, `Delete`, `Move`, `Set`,
+  and `Replace` are defined. `Get`/`Print` (advertised in official docs) throw
+  `ReferenceError` in headless mode, and `editId`/`edits` patch retries are
+  unavailable, so the description now states the real operation list, the read
+  paths, and the resend-after-failure flow instead of deferring to the official
+  documentation chain.
+- Prefix headless `pencil_mcp_get_app_state` results with the available
+  operation list so the model never needs to probe the engine or research tool
+  usage elsewhere.
+- Update the preset prompt in the README to state that tool descriptions are
+  the complete usage reference: no searching, probing, or verifying usage in
+  any other way.
+
 ## 0.5.0-beta.4 - 2026-08-15
 
 - Make the canvas chrome and embedded Pencil editor follow the resolved Harness
