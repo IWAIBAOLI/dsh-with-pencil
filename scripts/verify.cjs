@@ -224,6 +224,9 @@ try {
   if (!client.includes('var(--dsw-specific-menu') || !client.includes('var(--dsw-shadow-lv3') || !client.includes('var(--dsw-alias-interactive-bg-hover') || client.includes('0 12px 32px rgba(0,0,0,.42)')) {
     fail('canvas dropdowns must use the resolved Harness menu surface and elevation tokens')
   } else ok('canvas dropdowns use the resolved Harness menu surface and elevation tokens')
+  if (!client.includes('function useHarnessLanguage()') || !client.includes("attributeFilter: ['lang']") || !client.includes("openWorkspace: 'Open workspace folder'") || !client.includes("export: 'Export'") || !client.includes("float: 'Float'")) {
+    fail('plugin-owned workspace, file, export, and layout controls must follow the Harness document language')
+  } else ok('plugin-owned workspace, file, export, and layout controls follow the Harness document language')
   if (!client.includes('DEFAULT_SPLIT_RATIO = 0.42') || !client.includes('ratio: width / viewport') || !client.includes('setViewportWidth(viewport)') || client.includes('wide: width')) {
     fail('split canvas width must default smaller and follow viewport ratio')
   } else ok('split canvas defaults to 42% and follows viewport ratio')
