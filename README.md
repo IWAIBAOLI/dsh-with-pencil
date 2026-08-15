@@ -38,6 +38,17 @@ The plugin registers seven core model tools:
 - `pencil_mcp_export_html`
 - `pencil_mcp_export_nodes`
 
+### Recommended Harness preset
+
+Create a custom preset in Harness and paste this short instruction:
+
+> dsh-with-pencil is installed and ready. For Pencil, pen.dev, canvas, or
+> `.pen` tasks, use the built-in `pencil_mcp_*` tools directly—do not search
+> for or install plugins/MCP servers, run the Pencil CLI, or edit `.pen` JSON
+> manually. Use `pencil_mcp_open` for a named file,
+> `pencil_mcp_get_app_state` for the current canvas, `pencil_mcp_execute` for
+> edits, and `pencil_mcp_get_screenshot` to verify results.
+
 Five legacy one-shot CLI helpers are hidden by default to avoid duplicated
 capabilities and irrelevant model context. Set `DSH_PEN_LEGACY_TOOLS=1` only
 when compatibility requires `status`, `login`, `workspaces`, `design`, and
@@ -235,6 +246,16 @@ not. See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 - `pencil_mcp_get_screenshot`
 - `pencil_mcp_export_html`
 - `pencil_mcp_export_nodes`
+
+### 推荐的 Harness 自定义 preset
+
+在 Harness 中创建自定义 preset，并粘贴以下简短提示词：
+
+> dsh-with-pencil 已安装并可用。遇到 Pencil、pen.dev、画布或 `.pen` 任务时，直接使用
+> 内置 `pencil_mcp_*` 工具；不要搜索或安装插件/MCP，不要运行 Pencil CLI，也不要手改
+> `.pen` JSON。指定文件使用 `pencil_mcp_open`，当前画布使用
+> `pencil_mcp_get_app_state`，编辑使用 `pencil_mcp_execute`，完成后使用
+> `pencil_mcp_get_screenshot` 检查。
 
 为避免重复能力和无关上下文，5 个旧的一次性 CLI 助手默认隐藏。仅在兼容需要时设置
 `DSH_PEN_LEGACY_TOOLS=1`，恢复 `status`、`login`、`workspaces`、`design` 和
