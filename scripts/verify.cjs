@@ -203,6 +203,9 @@ try {
   else ok('dsh.client.platform = web')
   if (!pkg.exports || pkg.exports['./client'] !== './lib/client.js') fail('package must export "./client" -> ./lib/client.js')
   else ok('exports["./client"] -> lib/client.js')
+  if (!decl.inject || !decl.inject.includes('@deepseek-ai/dsh-client-locale') || !pkg.peerDependencies || !pkg.peerDependencies['@deepseek-ai/dsh-client-locale']) {
+    fail('browser half must declare the Harness locale client service')
+  } else ok('browser half declares the Harness locale client service')
   const client = fs.readFileSync(path.join(root, 'lib/client.js'), 'utf8')
   clientSource = client
   if (!client.startsWith('window.__ModuleLoader__.load({')) fail('client bundle must start with the __ModuleLoader__.load wrap')
@@ -224,9 +227,12 @@ try {
   if (!client.includes('var(--dsw-specific-menu') || !client.includes('var(--dsw-shadow-lv3') || !client.includes('var(--dsw-alias-interactive-bg-hover') || client.includes('0 12px 32px rgba(0,0,0,.42)')) {
     fail('canvas dropdowns must use the resolved Harness menu surface and elevation tokens')
   } else ok('canvas dropdowns use the resolved Harness menu surface and elevation tokens')
-  if (!client.includes('function useHarnessLanguage()') || !client.includes("attributeFilter: ['lang']") || !client.includes("openWorkspace: 'Open workspace folder'") || !client.includes("export: 'Export'") || !client.includes("float: 'Float'")) {
-    fail('plugin-owned workspace, file, export, and layout controls must follow the Harness document language')
-  } else ok('plugin-owned workspace, file, export, and layout controls follow the Harness document language')
+  if (!client.includes('function useHarnessLanguage(locale)') || !client.includes('locale.subscribe(listener)') || !client.includes('locale.getSnapshot()') || !client.includes("const inject = ['slots', 'locale']") || client.includes("attributeFilter: ['lang']") || !client.includes("openWorkspace: 'Open workspace folder'") || !client.includes("canvas: 'pen.dev Canvas'") || !client.includes("float: 'Float'")) {
+    fail('all plugin-owned canvas controls must subscribe to the Harness locale service')
+  } else ok('all plugin-owned canvas controls subscribe to the Harness locale service')
+  if (!client.includes('.dsh-penhost-control {') || !client.includes("const className = 'dsh-penhost-control dsh-penhost-header-btn'") || !client.includes("className: 'dsh-penhost-control dsh-penhost-mode'")) {
+    fail('conversation and canvas layout actions must share one compact control style')
+  } else ok('conversation and canvas layout actions share one compact control style')
   if (!client.includes('DEFAULT_SPLIT_RATIO = 0.42') || !client.includes('ratio: width / viewport') || !client.includes('setViewportWidth(viewport)') || client.includes('wide: width')) {
     fail('split canvas width must default smaller and follow viewport ratio')
   } else ok('split canvas defaults to 42% and follows viewport ratio')

@@ -142,7 +142,8 @@ The development-only profile fixture is available at
 - The canvas chrome and Pencil editor follow the active Harness/system light or
   dark theme automatically; the plugin adds no separate theme control.
 - The toolbar contains workspace, `.pen` file, export, layout, and close
-  controls.
+  controls. These plugin-owned controls follow the active Harness language;
+  the official Pencil editor keeps its upstream English interface.
 - The editor iframe stays mounted within its conversation, including when the
   Agent changes the active file.
 - Manual edits autosave every six seconds; Agent edits await a save after every
@@ -319,7 +320,8 @@ npx @deepseek-ai/dsh plugin --profile web add file:/absolute/path/to/dsh-with-pe
 
 - 首次打开为 42% 右侧分屏；拖动后按视口比例保存，也可切成浮动窗口。
 - 画布外框和 Pencil editor 自动跟随 Harness/系统的明暗主题；插件不增加单独的主题开关。
-- 顶栏提供工作区、`.pen` 文件、导出、布局和关闭操作。
+- 顶栏提供工作区、`.pen` 文件、导出、布局和关闭操作。这些插件自有控件跟随当前 Harness
+  语言；官方 Pencil editor 保持其上游英文界面。
 - editor iframe 在当前会话中保持挂载，Agent 切换文件时不会因重建 iframe 丢失引擎。
 - 用户手工编辑每 6 秒触发保存；Agent 编辑逐次等待保存确认。
 - “另存为”在工作区内创建新的 `.pen`，拒绝覆盖已有文件，自动切换到副本并保持原文件不变。

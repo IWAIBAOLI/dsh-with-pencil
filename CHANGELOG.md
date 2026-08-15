@@ -15,9 +15,9 @@ All notable changes to this project are documented here. Versions follow
   PDF files, with an action to reveal the output folder.
 - Match dropdown surfaces, borders, shadows, hover states, and compact spacing
   to the resolved Harness menu theme in both light and dark mode.
-- Localize the plugin-owned workspace, file and Export menus plus the
-  Float/Split control from the active Harness document language, updating live
-  when that language changes.
+- Localize every plugin-owned canvas entry point and control from the active
+  Harness locale service, updating live when that language changes; align the
+  conversation and Float/Split actions with one compact Harness-style button.
 
 ## 0.5.0-beta.3 - 2026-08-15
 
