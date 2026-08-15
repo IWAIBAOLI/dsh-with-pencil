@@ -87,13 +87,19 @@ refreshed through the editor's `watch-file` protocol.
 With a working DeepSeek Harness Web profile, install the npm bundle:
 
 ```bash
-dsh plugin --profile web add dsh-with-pencil@beta
+npx @deepseek-ai/dsh plugin --profile web add dsh-with-pencil@beta
 ```
 
-Restart DSH afterward. That is the complete normal installation. The npm bundle
-installs the pinned official `@pen.dev/cli`. The first time you open a canvas,
-the plugin downloads editor `0.1.94` directly from the official pen.dev release
-source, verifies its pinned SHA-256 checksum, and atomically caches it under
+Restart DSH Web after installation (`Ctrl-C` the running process first):
+
+```bash
+npx @deepseek-ai/dsh web
+```
+
+That is the complete normal installation. The npm bundle installs the pinned
+official `@pen.dev/cli`. The first time you open a canvas, the plugin downloads
+editor `0.1.94` directly from the official pen.dev release source, verifies its
+pinned SHA-256 checksum, and atomically caches it under
 `~/.dsh/dsh-with-pencil/editor/0.1.94/`. Harness startup does not download or
 open anything, and subsequent canvas opens use the verified cache.
 
@@ -104,7 +110,7 @@ of time and point `DSH_PEN_EDITOR_DIR` to its `out` directory.
 For local development from this checkout:
 
 ```bash
-dsh plugin --profile web add file:/absolute/path/to/dsh-with-pencil
+npx @deepseek-ai/dsh plugin --profile web add file:/absolute/path/to/dsh-with-pencil
 ```
 
 Use `file:` rather than `link:` so the target profile receives a complete
@@ -258,12 +264,18 @@ Script 引用文件通过 editor 的 `watch-file` 协议实时刷新。
 在已有可用 DeepSeek Harness Web profile 的前提下，安装 npm Bundle：
 
 ```bash
-dsh plugin --profile web add dsh-with-pencil@beta
+npx @deepseek-ai/dsh plugin --profile web add dsh-with-pencil@beta
 ```
 
-随后重启 DSH，这就是正常情况下的完整安装步骤。npm Bundle 会安装固定版本的官方
-`@pen.dev/cli`。用户第一次打开画布时，插件才会从 pen.dev 官方发行源直接下载 editor
-`0.1.94`，核对固定的 SHA-256 校验值，并原子缓存到
+安装完成后重启 DSH Web（先用 `Ctrl-C` 停止正在运行的进程）：
+
+```bash
+npx @deepseek-ai/dsh web
+```
+
+这就是正常情况下的完整安装步骤。npm Bundle 会安装固定版本的官方 `@pen.dev/cli`。
+用户第一次打开画布时，插件才会从 pen.dev 官方发行源直接下载 editor `0.1.94`，核对
+固定的 SHA-256 校验值，并原子缓存到
 `~/.dsh/dsh-with-pencil/editor/0.1.94/`。Harness 启动时不会下载或打开画布，之后再次
 打开会直接使用已验证缓存。
 
@@ -273,7 +285,7 @@ npm 包本身不复制或再分发 browser editor。离线环境可以预先下�
 从本仓库进行本地开发安装：
 
 ```bash
-dsh plugin --profile web add file:/absolute/path/to/dsh-with-pencil
+npx @deepseek-ai/dsh plugin --profile web add file:/absolute/path/to/dsh-with-pencil
 ```
 
 这里使用 `file:` 而不是 `link:`，让目标 profile 得到完整依赖树。从旧开发版迁移时，先移除

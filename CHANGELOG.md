@@ -16,6 +16,7 @@ All notable changes to this project are documented here. Versions follow
   `DSH_PEN_EDITOR_CACHE_DIR` for custom cache placement.
 - Declare the two DSH browser client packages used by the public client bundle
   as peer dependencies.
+- Document the exact DSH Web restart command after plugin installation.
 
 ## 0.5.0-beta.2 - 2026-08-15
 
