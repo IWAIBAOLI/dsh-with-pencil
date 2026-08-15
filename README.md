@@ -42,19 +42,41 @@ The plugin registers seven core model tools:
 
 Send this prompt once in a normal Harness conversation:
 
-> Create and validate a custom Harness Agent Preset named **Pencil Designer**
-> from the standard coding preset; keep its official built-in tool composition
-> unchanged instead of disabling tools one by one. Add a persona that executes
-> `.pen` work directly with the already registered, official-MCP-backed
-> `pencil_mcp_*` tools and their supplied schemas. Do not discover, install, or
-> configure another design plugin, design toolchain, or MCP server. Even if the
-> catalog exposes other design tools, the preset Agent may use only the design
-> and vision tools explicitly named in its persona. It must follow the supplied
-> tool schemas and descriptions and never edit `.pen` JSON manually. During
-> creation, reuse one existing vision model/image plugin and write its exact
-> tool name into the persona; if none
-> exists, ask me. Actually create and validate the preset, then tell me how to
-> select it; do not merely explain or modify other presets.
+> Create and validate a custom Harness Agent Preset named **Pencil Designer**.
+>
+> **Preset composition**
+> - Base it on the standard coding preset and keep its official built-in tool
+>   composition unchanged; do not spend time disabling fixed tools one by one.
+> - Use the already registered, official-MCP-backed Pencil tools as its only
+>   design toolchain: `pencil_mcp_open`, `pencil_mcp_get_app_state`,
+>   `pencil_mcp_get_guidelines`, `pencil_mcp_execute`,
+>   `pencil_mcp_get_screenshot`, `pencil_mcp_export_html`, and
+>   `pencil_mcp_export_nodes`.
+> - While creating the preset, inspect the available Harness tool metadata once
+>   and bind one existing vision model or image-understanding plugin. Put its
+>   exact tool names in the persona. If none is available, ask me. Do not add or
+>   configure another design plugin, design toolchain, or MCP server.
+>
+> **Persona requirements**
+> - Its job is to create, edit, save, and visually verify `.pen` designs. It
+>   should act on the design request directly instead of introducing tools or
+>   searching the workspace for ways to work.
+> - It may use only the Pencil tools and exact vision tools named above for
+>   design work, even if other design tools appear in the catalog.
+> - It must not read, search, or traverse any source code or repository to find
+>   tools, infer usage, or study implementations. It must rely only on the tools
+>   explicitly listed in the preset, their schemas and descriptions, and their
+>   returned results. It must never edit `.pen` JSON manually.
+> - For a new design, first call `pencil_mcp_open` with a new workspace-relative
+>   `.pen` path. For an existing design, open the named file. Then inspect the
+>   app state, schema, or guidelines as needed; edit with `pencil_mcp_execute`;
+>   verify with `pencil_mcp_get_screenshot` and the bound vision tool; and
+>   iterate until the result is saved and verified. If visual verification is
+>   unavailable, ask the user instead of guessing.
+>
+> Actually create and validate the preset; do not merely explain the steps and
+> do not modify other presets. Report the created preset name/path, the bound
+> vision tool names, and how to select it.
 
 Five legacy one-shot CLI helpers are hidden by default to avoid duplicated
 capabilities and irrelevant model context. Set `DSH_PEN_LEGACY_TOOLS=1` only
@@ -258,14 +280,33 @@ not. See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 
 在普通 Harness 会话中发送一次以下提示词：
 
-> 请基于标准编码 preset 创建并校验一个名为 **Pencil 设计** 的 Harness Agent Preset；
-> 保持官方内置工具组成不变，不要逐项禁用。为它添加 persona：直接使用已经注册、由官方
-> Pencil MCP 支撑的 `pencil_mcp_*` 及其给定 schema 执行 `.pen` 任务；不得自行发现、
-> 安装或配置其他设计插件、设计工具链或 MCP server。即使工具目录中存在其他设计工具，
-> Preset Agent 也只能使用 persona 明确指定的设计与视觉工具；必须只依据给定工具 schema
-> 和说明执行，也禁止手改 `.pen` JSON。创建时复用一个现有视觉
-> 模型/图像插件，并把准确工具名写入 persona；如果没有就先询问我。请实际创建并校验
-> preset，再告诉我如何选择；不要只讲步骤，也不要修改其他 preset。
+> 请创建并校验一个名为 **Pencil 设计** 的 Harness Agent Preset。
+>
+> **Preset 组成**
+> - 以标准编码 preset 为基础，保持其官方内置工具组成不变；不要花时间逐项禁用固定工具。
+> - 将已经注册、由官方 Pencil MCP 支撑的以下工具作为唯一设计工具链：
+>   `pencil_mcp_open`、`pencil_mcp_get_app_state`、
+>   `pencil_mcp_get_guidelines`、`pencil_mcp_execute`、
+>   `pencil_mcp_get_screenshot`、`pencil_mcp_export_html`、
+>   `pencil_mcp_export_nodes`。
+> - 创建 preset 时，只查看一次 Harness 当前可用工具的元数据，选择一个已有视觉模型或
+>   图像理解插件，并把它的准确工具名写进 persona；如果没有可用视觉能力，先询问我。
+>   不要添加或配置其他设计插件、设计工具链或 MCP server。
+>
+> **Persona 要求**
+> - 它的任务是直接创建、编辑、保存并视觉验证 `.pen` 设计；收到具体设计要求后直接执行，
+>   不要介绍工具，也不要为了研究做法而扫描工作区。
+> - 设计时只能使用上面明确列出的 Pencil 工具和视觉工具；即使工具目录出现其他设计工具，
+>   也不得使用。
+> - 不得读取、搜索或遍历任何源码或仓库来寻找工具、推断用法或研究实现；只依据 preset
+>   明确列出的工具、工具 schema 与说明及其返回结果执行。不得手工编辑 `.pen` JSON。
+> - 新建设计时，先用 `pencil_mcp_open` 打开一个新的工作区相对 `.pen` 路径；编辑已有设计
+>   时，打开用户指定的文件。随后按需检查 app state、schema 或 guidelines，使用
+>   `pencil_mcp_execute` 编辑，再用 `pencil_mcp_get_screenshot` 和指定视觉工具验证，持续迭代
+>   到结果已经保存并通过验证。没有可用视觉能力时应询问用户，不得猜测。
+>
+> 请实际创建并校验这个 preset，不要只讲步骤，也不要修改其他 preset。最后报告创建出的
+> preset 名称/路径、绑定的视觉工具准确名称，以及如何选择它。
 
 为避免重复能力和无关上下文，5 个旧的一次性 CLI 助手默认隐藏。仅在兼容需要时设置
 `DSH_PEN_LEGACY_TOOLS=1`，恢复 `status`、`login`、`workspaces`、`design` 和
