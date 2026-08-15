@@ -322,6 +322,17 @@ try {
   ok(`bundles = [${bundles.join(', ')}]`)
 } catch (err) { fail('profile: ' + err.message) }
 
+// 6. Public README language order
+console.log('[6] README language order')
+try {
+  const readme = fs.readFileSync(path.join(root, 'README.md'), 'utf8')
+  const english = readme.indexOf('## English')
+  const chinese = readme.indexOf('## 简体中文')
+  if (english < 0 || chinese < 0 || english > chinese) {
+    fail('README must present the complete English section before Simplified Chinese')
+  } else ok('README presents English before Simplified Chinese')
+} catch (err) { fail('README language order: ' + err.message) }
+
 console.log('')
 if (failures) {
   console.error(`✗ ${failures} check(s) failed`)
