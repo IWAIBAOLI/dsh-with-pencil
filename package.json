@@ -12,6 +12,11 @@
     "url": "https://github.com/IWAIBAOLI/dsh-with-pencil/issues"
   },
   "homepage": "https://github.com/IWAIBAOLI/dsh-with-pencil#readme",
+  "publishConfig": {
+    "access": "public",
+    "tag": "beta",
+    "registry": "https://registry.npmjs.org/"
+  },
   "type": "module",
   "main": "./lib/index.js",
   "exports": {

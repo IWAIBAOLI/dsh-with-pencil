@@ -65,12 +65,17 @@ worktree and tarball gates; the items above still require a human decision.
 5. Inspect the tarball. It must contain only this project's code and notices;
    `@pen.dev/cli`, editor assets, DSH packages, credentials, `.pen` documents and
    absolute local paths must not be embedded.
-6. Commit the version, tag the exact commit, then publish the beta without
-   moving `latest`:
+6. Commit the version and tag the exact commit. For an initial local publish,
+   sign in with 2FA and run:
 
    ```sh
-   npm publish --access public --tag beta --provenance
+   npm publish
    ```
+
+   `publishConfig` fixes access to public and the dist-tag to `beta`. Do not add
+   `--provenance` to a local publish: npm provenance requires a supported
+   cloud-hosted CI runner. For later releases, prefer GitHub Actions trusted
+   publishing; npm then creates provenance automatically without that flag.
 
 7. Install the published artifact in another clean profile:
 
