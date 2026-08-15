@@ -31,8 +31,9 @@ for (const file of requiredFiles) {
 if (pkg.dsh?.bundle?.patch !== './cordis.patch.yml') fail('dsh.bundle.patch must point to ./cordis.patch.yml')
 if (pkg.dsh?.client?.platform !== 'web') fail('dsh.client.platform must be web')
 if (pkg.publishConfig?.access !== 'public') fail('publishConfig.access must be public')
-if (pkg.publishConfig?.tag !== 'beta') fail('publishConfig.tag must keep prereleases off latest')
 if (pkg.publishConfig?.registry !== 'https://registry.npmjs.org/') fail('publishConfig.registry must be the public npm registry')
+if (pkg.scripts?.prepublishOnly !== 'node scripts/prepublish-guard.cjs && npm run release:check') fail('prepublishOnly must enforce the beta tag and release gates')
+if (!fs.existsSync(path.join(root, 'scripts/prepublish-guard.cjs'))) fail('publish guard script is missing')
 
 const patch = fs.readFileSync(path.join(root, 'cordis.patch.yml'), 'utf8')
 const escapedName = String(pkg.name || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')

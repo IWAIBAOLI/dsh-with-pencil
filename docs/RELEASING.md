@@ -69,10 +69,11 @@ worktree and tarball gates; the items above still require a human decision.
    sign in with 2FA and run:
 
    ```sh
-   npm publish
+   npm publish --tag beta
    ```
 
-   `publishConfig` fixes access to public and the dist-tag to `beta`. Do not add
+   `publishConfig` fixes access and the public registry; `prepublishOnly`
+   rejects any prerelease publish that omits `--tag beta`. Do not add
    `--provenance` to a local publish: npm provenance requires a supported
    cloud-hosted CI runner. For later releases, prefer GitHub Actions trusted
    publishing; npm then creates provenance automatically without that flag.

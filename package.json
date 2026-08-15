@@ -14,7 +14,6 @@
   "homepage": "https://github.com/IWAIBAOLI/dsh-with-pencil#readme",
   "publishConfig": {
     "access": "public",
-    "tag": "beta",
     "registry": "https://registry.npmjs.org/"
   },
   "type": "module",
@@ -65,6 +64,7 @@
   },
   "scripts": {
     "pack:check": "node scripts/pack-check.cjs",
+    "prepublishOnly": "node scripts/prepublish-guard.cjs && npm run release:check",
     "release:check": "npm test && node scripts/release-check.cjs",
     "verify": "node scripts/verify.cjs",
     "test": "node scripts/test-all.cjs"
