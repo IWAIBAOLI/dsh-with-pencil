@@ -58,11 +58,12 @@ Send this prompt once in a normal Harness conversation:
 > tool, read its own description and parameter definitions in the Agent's
 > available-tools list; do not search elsewhere for usage instructions.
 >
-> For a new design, first use `pencil_mcp_open` to create a `.pen` file inside
-> the workspace, then edit, take screenshots, and visually verify it until it is
-> saved. Do not use unspecified design tools or inspect any source code or
-> repository to find tools or study their usage. Prefer the assigned design
-> tools for `.pen` edits; do not treat direct JSON editing as the default.
+> The persona must require the Agent, when starting a new design, to first use
+> `pencil_mcp_open` to create a `.pen` file inside the workspace, then edit, take
+> screenshots, and visually verify it until it is saved. Do not use unspecified
+> design tools or inspect any source code or repository to find tools or study
+> their usage. Prefer the assigned design tools for `.pen` edits; do not treat
+> direct JSON editing as the default.
 >
 > When finished, report the preset name/path, the bound vision tool, and how to
 > select the preset. Do not modify any other preset.
@@ -282,10 +283,10 @@ not. See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 > 工具。调用前查看 Agent 可用工具列表中这些工具自带的说明和参数定义，不要自行搜索
 > 使用方法。
 >
-> 新建设计时，先用 `pencil_mcp_open` 创建工作区内的 `.pen` 文件，再使用指定工具编辑、
-> 截图并进行视觉验证，直至保存完成。不得使用未指定的设计工具，不得通过翻查任何源码或
-> 仓库来寻找工具、研究用法。编辑 `.pen` 时优先使用指定设计工具，不把直接修改 JSON
-> 作为默认方式。
+> Persona 应要求 Agent 在新建设计时，先用 `pencil_mcp_open` 创建工作区内的 `.pen`
+> 文件，再使用指定工具编辑、截图并进行视觉验证，直至保存完成。不得使用未指定的设计
+> 工具，不得通过翻查任何源码或仓库来寻找工具、研究用法。编辑 `.pen` 时优先使用指定
+> 设计工具，不把直接修改 JSON 作为默认方式。
 >
 > 创建完成后，报告 Preset 名称或路径、绑定的视觉工具和选择方法；不要修改其他 Preset。
 
