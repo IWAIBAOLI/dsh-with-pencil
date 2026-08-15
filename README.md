@@ -38,18 +38,19 @@ The plugin registers seven core model tools:
 - `pencil_mcp_export_html`
 - `pencil_mcp_export_nodes`
 
-### Recommended Harness preset
+### Create a Pencil Agent preset
 
-Create a custom preset in Harness and paste this short instruction:
+Send this prompt once in a normal Harness conversation:
 
-> dsh-with-pencil is installed and ready. For Pencil, pen.dev, canvas, or
-> `.pen` tasks, use the built-in `pencil_mcp_*` tools directly—do not search
-> for or install plugins/MCP servers, run the Pencil CLI, or edit `.pen` JSON
-> manually. Use `pencil_mcp_open` for a named file,
-> `pencil_mcp_get_app_state` for the current canvas, `pencil_mcp_execute` for
-> edits, and `pencil_mcp_get_screenshot` to verify results. When visual
-> judgment is needed, check once for an available vision-capable model or image
-> plugin; if none is available, ask the user to review the result.
+> Create and validate a custom Harness Agent Preset named **Pencil Designer**
+> from the standard coding preset, retaining its existing tools. Add a persona
+> that uses the installed `pencil_mcp_*` tools directly for `.pen` work
+> (`pencil_mcp_open`, `pencil_mcp_get_app_state`, `pencil_mcp_execute`, and
+> `pencil_mcp_get_screenshot`), never searches for another Pencil
+> plugin/MCP/CLI, and never edits `.pen` JSON manually. Reuse an
+> available vision model or image plugin; if none exists, ask me. Actually
+> create the preset and tell me how to select it—do not merely explain the
+> steps or modify other presets.
 
 Five legacy one-shot CLI helpers are hidden by default to avoid duplicated
 capabilities and irrelevant model context. Set `DSH_PEN_LEGACY_TOOLS=1` only
@@ -249,16 +250,17 @@ not. See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 - `pencil_mcp_export_html`
 - `pencil_mcp_export_nodes`
 
-### 推荐的 Harness 自定义 preset
+### 创建 Pencil Agent Preset
 
-在 Harness 中创建自定义 preset，并粘贴以下简短提示词：
+在普通 Harness 会话中发送一次以下提示词：
 
-> dsh-with-pencil 已安装并可用。遇到 Pencil、pen.dev、画布或 `.pen` 任务时，直接使用
-> 内置 `pencil_mcp_*` 工具；不要搜索或安装插件/MCP，不要运行 Pencil CLI，也不要手改
-> `.pen` JSON。指定文件使用 `pencil_mcp_open`，当前画布使用
-> `pencil_mcp_get_app_state`，编辑使用 `pencil_mcp_execute`，完成后使用
-> `pencil_mcp_get_screenshot` 检查。需要视觉判断时，先检查一次当前是否有视觉模型或图像
-> 理解插件；如果没有，应请用户检查结果，不要假装已经看见。
+> 请以标准编码 preset 为基础，创建并校验一个名为 **Pencil 设计** 的 Harness Agent
+> Preset，保留其原有工具。为它添加 persona：处理 `.pen` 时直接使用已安装的
+> `pencil_mcp_*` 工具（`pencil_mcp_open`、`pencil_mcp_get_app_state`、
+> `pencil_mcp_execute`、`pencil_mcp_get_screenshot`），不搜索其他 Pencil
+> 插件/MCP/CLI，也不手改 `.pen` JSON；复用现有视觉模型或图像插件，
+> 如果没有就先询问我。请实际创建 preset 并告诉我如何选择；不要只讲步骤，也不要修改
+> 其他 preset。
 
 为避免重复能力和无关上下文，5 个旧的一次性 CLI 助手默认隐藏。仅在兼容需要时设置
 `DSH_PEN_LEGACY_TOOLS=1`，恢复 `status`、`login`、`workspaces`、`design` 和
