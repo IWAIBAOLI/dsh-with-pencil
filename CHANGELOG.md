@@ -4,6 +4,13 @@ All notable changes to this project are documented here. Versions follow
 [Semantic Versioning](https://semver.org/); prereleases are published under the
 `beta` npm dist-tag.
 
+## 0.5.0-beta.2 - 2026-08-15
+
+- Prepare the first public npm beta after completing the npm account's release
+  authentication requirements.
+- Present the complete English README before Simplified Chinese and enforce the
+  public documentation language order in release verification.
+
 ## 0.5.0-beta.1 - 2026-08-15
 
 - Adopt the public package name `dsh-with-pencil` to describe DSH using the
