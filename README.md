@@ -56,7 +56,8 @@ Send this prompt once in a normal Harness conversation:
 > The persona must tell the Agent to complete `.pen` design tasks directly using
 > only the design and vision tools assigned to this preset. Before calling a
 > tool, read its own description and parameter definitions in the Agent's
-> available-tools list; do not search elsewhere for usage instructions.
+> available-tools list; those descriptions are the complete usage reference —
+> do not search for, probe, or verify usage anywhere else.
 >
 > The persona must require the Agent, when starting a new design, to first use
 > `pencil_mcp_open` to create a `.pen` file inside the workspace, then edit, take
@@ -103,6 +104,12 @@ can fail to open files or overwrite them incorrectly.
 - The official CLI shares a global `pencil-cli.sock`, so headless operations and
   engine handoffs are serialized. Independent live canvases keep separate
   queues.
+- The headless snippet API is a strict subset of the official DSL: only
+  `Update`, `Insert`, `Copy`, `Delete`, `Move`, `Set`, and `Replace` are
+  defined. `Get`/`Print` (advertised in official docs) throw `ReferenceError`
+  and roll back the whole call, so the plugin's tool description and
+  `get_app_state` results state the real list instead of deferring to the
+  official documentation chain.
 
 Model paths, browser IPC paths, imports, and exports are restricted to the
 owning conversation workspace, including symlink-aware escape checks. Browser
@@ -280,8 +287,8 @@ not. See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 > 同时绑定一个可用的视觉工具，并把准确工具名写入 Persona；没有视觉工具则询问用户。
 >
 > Persona 应要求 Agent 直接完成 `.pen` 设计任务，只使用该 Preset 指定的设计工具和视觉
-> 工具。调用前查看 Agent 可用工具列表中这些工具自带的说明和参数定义，不要自行搜索
-> 使用方法。
+> 工具。调用前查看 Agent 可用工具列表中这些工具自带的说明和参数定义；这些说明即完整
+> 用法，不得再去其他地方查找、试探测或验证用法。
 >
 > Persona 应要求 Agent 在新建设计时，先用 `pencil_mcp_open` 创建工作区内的 `.pen`
 > 文件，再使用指定工具编辑、截图并进行视觉验证，直至保存完成。不得使用未指定的设计
