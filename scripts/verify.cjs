@@ -117,6 +117,7 @@ let workspacePathSource = ''
 let headlessSource = ''
 let modelToolsSource = ''
 let canvasHostSource = ''
+let canvasExportSource = ''
 let canvasTransportSource = ''
 let editorAssetsSource = ''
 let editorInstallerSource = ''
@@ -157,6 +158,7 @@ try {
 for (const [name, assign] of [
   ['model-tools.js', (source) => { modelToolsSource = source }],
   ['canvas-host.js', (source) => { canvasHostSource = source }],
+  ['canvas-export.js', (source) => { canvasExportSource = source }],
   ['canvas-transport.js', (source) => { canvasTransportSource = source }],
   ['editor-assets.js', (source) => { editorAssetsSource = source }],
   ['editor-installer.js', (source) => { editorInstallerSource = source }],
@@ -216,7 +218,7 @@ try {
   if (!client.includes('setPointerCapture(pointerId)') || !client.includes('html[data-penhost-pointer] .dsh-penhost-frame { pointer-events: none')) {
     fail('canvas resize/drag must keep pointer ownership across the editor iframe')
   } else ok('canvas resize/drag keeps pointer ownership across the editor iframe')
-  if (!client.includes('打开工作区文件夹') || !client.includes('新建 .pen 文件') || !client.includes('另存为…') || client.includes('当前会话 · 右侧分屏 · 自动保存')) {
+  if (!client.includes('打开工作区文件夹') || !client.includes('新建 .pen 文件') || !client.includes('另存为…') || !client.includes('导出 PNG（2×）') || !client.includes('导出 PDF') || client.includes('当前会话 · 右侧分屏 · 自动保存')) {
     fail('canvas toolbar must expose concise workspace/file controls')
   } else ok('canvas toolbar exposes concise workspace/file controls')
   if (!client.includes('DEFAULT_SPLIT_RATIO = 0.42') || !client.includes('ratio: width / viewport') || !client.includes('setViewportWidth(viewport)') || client.includes('wide: width')) {
@@ -296,6 +298,9 @@ if (!workspaceResourcesSource.includes('async function importFiles') || !workspa
 if (!canvasHostSource.includes("path: '/pen-host/save-as'") || !canvasHostSource.includes('writeFileAtomicNew') || !canvasHostSource.includes('the Save As target already exists')) {
   fail('Save As must persist an exclusive workspace copy and switch the canvas')
 } else ok('Save As persists an exclusive workspace copy and switches the canvas')
+if (!canvasHostSource.includes("path: '/pen-host/export'") || !canvasHostSource.includes('exporter.run(binding, format)') || !canvasExportSource.includes("transport.request(binding, 'export-nodes'") || !canvasExportSource.includes("path.join('exports', documentName)") || !canvasExportSource.includes("transport.request(binding, 'batch-get'")) {
+  fail('user export must render the current selection/document through live editor IPC into workspace-safe outputs')
+} else ok('user export renders the live selection/document into workspace-safe PNG/PDF outputs')
 if (!editorAssetsSource.includes('function preflight()') || !canvasHostSource.includes('editorAssets.preflight()')) {
   fail('canvas binding must reject missing or incompatible editor assets before handoff')
 } else ok('canvas binding preflights editor assets before handoff')
@@ -323,9 +328,9 @@ if (!pluginSource.includes('createHeadlessRuntime') || !pluginSource.includes('r
 if (pluginSource.includes("register('pencil_") || pluginSource.includes("path: '/pen-host/")) {
   fail('entrypoint must not contain model tool definitions or Canvas Host routes')
 } else ok('entrypoint contains no tool definitions or Canvas Host routes')
-if (!canvasHostSource.includes('createCanvasTransport()') || !canvasHostSource.includes('createEditorAssets(') || !canvasHostSource.includes('createSessionStore()') || !canvasHostSource.includes('createWorkspaceResources(')) {
-  fail('Canvas Host must delegate transport, editor assets, credentials, and workspace resources')
-} else ok('Canvas Host delegates transport, editor assets, credentials, and workspace resources')
+if (!canvasHostSource.includes('createCanvasTransport()') || !canvasHostSource.includes('createCanvasExporter(') || !canvasHostSource.includes('createEditorAssets(') || !canvasHostSource.includes('createSessionStore()') || !canvasHostSource.includes('createWorkspaceResources(')) {
+  fail('Canvas Host must delegate transport, export, editor assets, credentials, and workspace resources')
+} else ok('Canvas Host delegates transport, export, editor assets, credentials, and workspace resources')
 
 // 5. profile template composition
 console.log('[5] profile template')

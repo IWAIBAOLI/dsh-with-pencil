@@ -22,8 +22,9 @@ with DSH. It is independent and is not endorsed by pen.dev or DeepSeek.
 - A serialized official headless fallback when the browser canvas is closed.
 - Selection context injection for the next Agent turn, plus real image
   attachments from Pencil screenshots.
-- Workspace-safe file opening, creation, Save As, imports, generated images,
-  design libraries, external-change reloads, and conflict resolution.
+- Workspace-safe file opening, creation, Save As, live PNG/PDF export, imports,
+  generated images, design libraries, external-change reloads, and conflict
+  resolution.
 - A responsive 42% split view with pointer-safe resizing and an optional
   floating layout.
 
@@ -140,13 +141,17 @@ The development-only profile fixture is available at
   the canvas can also float.
 - The canvas chrome and Pencil editor follow the active Harness/system light or
   dark theme automatically; the plugin adds no separate theme control.
-- The toolbar contains workspace, `.pen` file, layout, and close controls.
+- The toolbar contains workspace, `.pen` file, export, layout, and close
+  controls.
 - The editor iframe stays mounted within its conversation, including when the
   Agent changes the active file.
 - Manual edits autosave every six seconds; Agent edits await a save after every
   successful operation.
 - Save As writes a new `.pen` inside the workspace, never overwrites an existing
   target, switches the canvas to the copy, and leaves the source unchanged.
+- Export uses the live editor state: it writes the selected nodes, or every
+  top-level node when nothing is selected, as 2× PNG files or a PDF under
+  `exports/<document-name>/`. The result menu can open that folder directly.
 - Imported and generated images are persisted to an adjacent `images/`
   directory. SVG is converted into nodes by the official editor.
 - Workspace `*.lib.pen` files and read-only libraries shipped with the official
@@ -167,6 +172,7 @@ lib/index.js                 Runtime composition and dependency resolution
 lib/headless-runtime.js      Official CLI/MCP engine lifecycle
 lib/model-tools.js           Seven model tools and screenshot attachments
 lib/canvas-host.js           Session binding, persistence, and editor IPC routes
+lib/canvas-export.js         Live selection/document PNG and PDF export
 lib/canvas-transport.js      Request queues, polling, cancellation, responses
 lib/editor-assets.js         Official editor discovery, injection, static files
 lib/editor-installer.js      Pinned download, verification, safe extraction, cache
@@ -189,8 +195,9 @@ npm run release:check
 ```
 
 Tests simulate real Agent calls and official editor IPC, including live edits,
-selection context, atomic saves, external reloads, conflicts, Save As,
-screenshots, cancellation, imports, generated assets, libraries, and binary IPC.
+selection context, atomic saves, external reloads, conflicts, Save As, live
+PNG/PDF export, screenshots, cancellation, imports, generated assets, libraries,
+and binary IPC.
 CI covers Node 22 and 24 on macOS and Linux.
 
 See [`docs/RELEASING.md`](docs/RELEASING.md) for release gates and rollback.
@@ -214,8 +221,8 @@ not. See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 - Agent 编辑直接进入可见 editor IPC，实时渲染，并等待确认后的原子磁盘保存。
 - 画布关闭时使用串行化的官方 headless 引擎。
 - 将画布选区注入下一轮 Agent 上下文，并把 Pencil 截图作为真正的图片附件返回。
-- 在会话工作区边界内提供文件打开、新建、另存为、资源导入、生成图片、设计库、
-  外部修改重载和冲突处理。
+- 在会话工作区边界内提供文件打开、新建、另存为、实时 PNG/PDF 导出、资源导入、
+  生成图片、设计库、外部修改重载和冲突处理。
 - 默认 42% 的响应式右侧分屏，拖动过程中保持指针控制，也可切成浮动窗口。
 
 插件默认注册 7 个核心模型工具：
@@ -312,10 +319,12 @@ npx @deepseek-ai/dsh plugin --profile web add file:/absolute/path/to/dsh-with-pe
 
 - 首次打开为 42% 右侧分屏；拖动后按视口比例保存，也可切成浮动窗口。
 - 画布外框和 Pencil editor 自动跟随 Harness/系统的明暗主题；插件不增加单独的主题开关。
-- 顶栏提供工作区、`.pen` 文件、布局和关闭操作。
+- 顶栏提供工作区、`.pen` 文件、导出、布局和关闭操作。
 - editor iframe 在当前会话中保持挂载，Agent 切换文件时不会因重建 iframe 丢失引擎。
 - 用户手工编辑每 6 秒触发保存；Agent 编辑逐次等待保存确认。
 - “另存为”在工作区内创建新的 `.pen`，拒绝覆盖已有文件，自动切换到副本并保持原文件不变。
+- 导出直接读取当前可见 editor：有选区时导出选区，否则导出全部顶层元素；可输出 2× PNG
+  或 PDF 到 `exports/<文档名>/`，并从结果菜单直接打开该文件夹。
 - 导入和生成的图片保存到设计旁的 `images/`；SVG 由官方 editor 转换成节点。
 - 工作区 `*.lib.pen` 和官方 CLI 随附的只读库会出现在 editor 设计库列表中。
 - 外部冲突和保存失败会一直显示在顶栏，不会静默覆盖脏文档。
@@ -331,6 +340,7 @@ lib/index.js                 运行边界编排与依赖解析
 lib/headless-runtime.js      官方 CLI/MCP 引擎生命周期
 lib/model-tools.js           7 个模型工具与截图附件
 lib/canvas-host.js           会话绑定、磁盘保存与 editor IPC 路由
+lib/canvas-export.js         当前选区/文档的 PNG 与 PDF 导出
 lib/canvas-transport.js      请求队列、轮询、取消和响应
 lib/editor-assets.js         官方 editor 定位、注入与静态资源
 lib/editor-installer.js      固定版本下载、校验、安全解压与缓存
@@ -353,8 +363,8 @@ npm run release:check
 ```
 
 测试模拟真实 Agent 调用和官方 editor IPC，覆盖实时编辑、选区上下文、原子保存、外部重载、
-冲突、另存为、截图、取消、资源导入、生成图片、设计库和二进制 IPC。CI 在 macOS 与 Linux
-上覆盖 Node 22/24。
+冲突、另存为、实时 PNG/PDF 导出、截图、取消、资源导入、生成图片、设计库和二进制 IPC。
+CI 在 macOS 与 Linux 上覆盖 Node 22/24。
 
 发布门槛和回滚步骤见 [`docs/RELEASING.md`](docs/RELEASING.md)。本对接代码采用 MIT 许可；
 官方 pen.dev 与 DeepSeek 组件不属于该许可，详见

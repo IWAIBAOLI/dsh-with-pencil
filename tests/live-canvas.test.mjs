@@ -142,6 +142,11 @@ async function fakeEditor() {
           ? '\n\n## Selected Elements:\n' + selectedElements.map((node) => '- `' + node.id + '` (' + node.type + '): ' + node.name).join('\n') + '\n\n## Canvas Design'
           : ''
         await postIpc({ id: message.id, type: 'response', method: message.method, payload: { success: true, result: { message: 'Canvas nodes (' + liveDocument.children.length + '): ' + names + selected } } })
+      } else if (message.method === 'batch-get') {
+        await postIpc({
+          id: message.id, type: 'response', method: message.method,
+          payload: { success: true, result: { nodes: liveDocument.children.map((node) => ({ ...node })) } },
+        })
       } else if (message.method === 'batch-design') {
         const match = /([A-Za-z][A-Za-z0-9_]*)=Insert\([^,]+,\{[^}]*name:\"([^\"]+)\"/.exec(message.payload.input || '')
         assert.ok(match, 'unsupported simulation input')
@@ -155,6 +160,13 @@ async function fakeEditor() {
         await postIpc({ id: message.id, type: 'response', method: message.method, payload: {} })
       } else if (message.method === 'get-screenshot') {
         await postIpc({ id: message.id, type: 'response', method: message.method, payload: { success: true, result: { image: 'iVBORw0KGgo=', mimeType: 'image/png' } } })
+      } else if (message.method === 'export-nodes') {
+        const format = message.payload.format || 'png'
+        const bytes = Buffer.from(format + ':' + message.payload.nodeIds.join(','))
+        await postIpc({
+          id: message.id, type: 'response', method: message.method,
+          payload: { success: true, result: { images: [{ nodeId: message.payload.nodeIds.join(','), image: bytes.toString('base64'), mimeType: format === 'pdf' ? 'application/pdf' : 'image/png' }] } },
+        })
       } else {
         await postIpc({ id: message.id, type: 'response', method: message.method, payload: { success: false, error: 'unhandled fake editor method ' + message.method } })
       }
@@ -322,6 +334,19 @@ try {
   const refusedOverwrite = await http('/pen-host/save-as', { method: 'POST', query, body: { file: 'one.pen' } })
   assert.equal(refusedOverwrite.status, 409)
   assert.match(refusedOverwrite.text, /already exists/)
+
+  selectedElements = [liveDocument.children[0], liveDocument.children[2]]
+  const exportedPng = await http('/pen-host/export', { method: 'POST', query, body: { format: 'png' } })
+  assert.equal(exportedPng.status, 200, exportedPng.text)
+  assert.equal(exportedPng.json().scope, 'selection')
+  assert.equal(exportedPng.json().files.length, 2)
+  assert.equal(fs.readFileSync(path.join(workspace, exportedPng.json().files[0]), 'utf8'), 'png:' + selectedElements[0].id)
+  selectedElements = []
+  const exportedPdf = await http('/pen-host/export', { method: 'POST', query, body: { format: 'pdf' } })
+  assert.equal(exportedPdf.status, 200, exportedPdf.text)
+  assert.equal(exportedPdf.json().scope, 'document')
+  assert.equal(exportedPdf.json().files.length, 1)
+  assert.equal(fs.readFileSync(path.join(workspace, exportedPdf.json().files[0]), 'utf8'), 'pdf:' + liveDocument.children.map((node) => node.id).join(','))
 
   await postIpc({ id: 'make-library', type: 'notification', method: 'turn-into-library', payload: {} })
   await waitFor(async () => (await http('/pen-host/state', { query })).json().file.endsWith('final.lib.pen'))

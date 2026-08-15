@@ -10,6 +10,9 @@ All notable changes to this project are documented here. Versions follow
   light/dark theme automatically, including live system-theme changes.
 - Remove light-only iframe and hover colors without adding a separate Pencil
   theme preference or manual plugin control.
+- Add a user-facing export menu backed directly by the live official editor:
+  selected nodes (or all top-level nodes) export to workspace-safe 2× PNG or
+  PDF files, with an action to reveal the output folder.
 
 ## 0.5.0-beta.3 - 2026-08-15
 
