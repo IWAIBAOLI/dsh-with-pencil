@@ -47,11 +47,14 @@ Send this prompt once in a normal Harness conversation:
 > unchanged instead of disabling tools one by one. Add a persona that executes
 > `.pen` work directly with the already registered, official-MCP-backed
 > `pencil_mcp_*` tools and their supplied schemas. Do not discover, install, or
-> configure another design plugin, design toolchain, or MCP server; do not
-> inspect plugin source or edit `.pen` JSON manually. During creation, reuse one
-> existing vision model/image plugin and write its exact tool name into the
-> persona; if none exists, ask me. Actually create and validate the preset, then
-> tell me how to select it; do not merely explain or modify other presets.
+> configure another design plugin, design toolchain, or MCP server. Even if the
+> catalog exposes other design tools, the preset Agent may use only the design
+> and vision tools explicitly named in its persona. It must rely on the supplied
+> tool schemas and descriptions, never inspect implementation source code, and
+> never edit `.pen` JSON manually. During creation, reuse one existing vision
+> model/image plugin and write its exact tool name into the persona; if none
+> exists, ask me. Actually create and validate the preset, then tell me how to
+> select it; do not merely explain or modify other presets.
 
 Five legacy one-shot CLI helpers are hidden by default to avoid duplicated
 capabilities and irrelevant model context. Set `DSH_PEN_LEGACY_TOOLS=1` only
@@ -258,9 +261,11 @@ not. See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 > 请基于标准编码 preset 创建并校验一个名为 **Pencil 设计** 的 Harness Agent Preset；
 > 保持官方内置工具组成不变，不要逐项禁用。为它添加 persona：直接使用已经注册、由官方
 > Pencil MCP 支撑的 `pencil_mcp_*` 及其给定 schema 执行 `.pen` 任务；不得自行发现、
-> 安装或配置其他设计插件、设计工具链或 MCP server，不得翻插件源码或手改 `.pen` JSON。
-> 创建时复用一个现有视觉模型/图像插件，并把准确工具名写入 persona；如果没有就先询问我。
-> 请实际创建并校验 preset，再告诉我如何选择；不要只讲步骤，也不要修改其他 preset。
+> 安装或配置其他设计插件、设计工具链或 MCP server。即使工具目录中存在其他设计工具，
+> Preset Agent 也只能使用 persona 明确指定的设计与视觉工具；必须只依据给定工具 schema
+> 和说明执行，禁止查看任何实现源码，也禁止手改 `.pen` JSON。创建时复用一个现有视觉
+> 模型/图像插件，并把准确工具名写入 persona；如果没有就先询问我。请实际创建并校验
+> preset，再告诉我如何选择；不要只讲步骤，也不要修改其他 preset。
 
 为避免重复能力和无关上下文，5 个旧的一次性 CLI 助手默认隐藏。仅在兼容需要时设置
 `DSH_PEN_LEGACY_TOOLS=1`，恢复 `status`、`login`、`workspaces`、`design` 和
