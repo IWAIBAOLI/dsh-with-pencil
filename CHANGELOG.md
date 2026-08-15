@@ -4,6 +4,19 @@ All notable changes to this project are documented here. Versions follow
 [Semantic Versioning](https://semver.org/); prereleases are published under the
 `beta` npm dist-tag.
 
+## 0.5.0-beta.3 - 2026-08-15
+
+- Make the normal installation genuinely one command: the first explicit
+  canvas open downloads editor `0.1.94` directly from the official pen.dev
+  release source and reuses its verified local cache afterward.
+- Pin and verify the editor archive SHA-256, enforce download and extracted-size
+  limits, reject unsafe ZIP paths and symbolic links, and install through a
+  cross-process lock plus atomic directory rename.
+- Keep `DSH_PEN_EDITOR_DIR` as an offline/development override and add
+  `DSH_PEN_EDITOR_CACHE_DIR` for custom cache placement.
+- Declare the two DSH browser client packages used by the public client bundle
+  as peer dependencies.
+
 ## 0.5.0-beta.2 - 2026-08-15
 
 - Prepare the first public npm beta after completing the npm account's release

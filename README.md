@@ -84,22 +84,22 @@ refreshed through the editor's `watch-file` protocol.
 
 ### Install the beta
 
-Prerequisites:
-
-1. A working DeepSeek Harness Web profile.
-2. The compatible official Pencil editor bundle. Obtain
-   `editor-bundle-v0.1.94.zip` from the official pen.dev release source, extract
-   it, and point `DSH_PEN_EDITOR_DIR` to its `out` directory containing
-   `index.html`.
-
-Install the npm bundle into a DSH profile:
+With a working DeepSeek Harness Web profile, install the npm bundle:
 
 ```bash
 dsh plugin --profile web add dsh-with-pencil@beta
 ```
 
-Restart DSH afterward. The npm bundle installs the pinned official
-`@pen.dev/cli`; it does not contain or redistribute the browser editor assets.
+Restart DSH afterward. That is the complete normal installation. The npm bundle
+installs the pinned official `@pen.dev/cli`. The first time you open a canvas,
+the plugin downloads editor `0.1.94` directly from the official pen.dev release
+source, verifies its pinned SHA-256 checksum, and atomically caches it under
+`~/.dsh/dsh-with-pencil/editor/0.1.94/`. Harness startup does not download or
+open anything, and subsequent canvas opens use the verified cache.
+
+The browser editor is not copied into or redistributed through this npm
+package. For offline use, download and extract the same official bundle ahead
+of time and point `DSH_PEN_EDITOR_DIR` to its `out` directory.
 
 For local development from this checkout:
 
@@ -119,7 +119,8 @@ The development-only profile fixture is available at
 
 | Variable | Purpose |
 |---|---|
-| `DSH_PEN_EDITOR_DIR` | Official editor `out` directory; unrelated to a conversation workspace |
+| `DSH_PEN_EDITOR_DIR` | Optional offline/development override for an official editor `out` directory |
+| `DSH_PEN_EDITOR_CACHE_DIR` | Override the automatic editor cache root; defaults to `~/.dsh/dsh-with-pencil/editor` |
 | `DSH_PEN_FILE` | Initial workspace-relative `.pen` path; defaults to `designs/design.pen` |
 | `DSH_PEN_CLI_BIN` / `DSH_PEN_MCP_BIN` | Override official CLI/MCP paths; normally unnecessary |
 | `DSH_PEN_MCP_APP` | Explicitly connect an external Pencil app; no automatic probing |
@@ -145,7 +146,9 @@ The development-only profile fixture is available at
 - External conflicts and save failures remain visible in the toolbar and never
   silently overwrite a dirty document.
 - Shutdown flushes dirty canvases before releasing their sessions.
-- Missing or incompatible editor assets fail before an empty iframe opens.
+- The pinned editor downloads only on the first canvas open; download,
+  checksum, extraction, or compatibility failures appear before an empty
+  iframe opens.
 - Cancelled requests that have not reached the editor are removed from its
   queue; delivered requests require a canvas-state check before retrying.
 
@@ -158,6 +161,7 @@ lib/model-tools.js           Seven model tools and screenshot attachments
 lib/canvas-host.js           Session binding, persistence, and editor IPC routes
 lib/canvas-transport.js      Request queues, polling, cancellation, responses
 lib/editor-assets.js         Official editor discovery, injection, static files
+lib/editor-installer.js      Pinned download, verification, safe extraction, cache
 lib/ipc-binary.js            Lossless binary values over JSON browser IPC
 lib/session-store.js         Browser/CLI login reuse and secure persistence
 lib/workspace-resources.js   Imports, generated images, watchers, libraries
@@ -251,21 +255,20 @@ Script 引用文件通过 editor 的 `watch-file` 协议实时刷新。
 
 ### 安装 beta
 
-前置条件：
-
-1. 可用的 DeepSeek Harness Web profile。
-2. 兼容的官方 Pencil editor bundle。从 pen.dev 官方发行源取得
-   `editor-bundle-v0.1.94.zip`，解压后将 `DSH_PEN_EDITOR_DIR` 指向包含
-   `index.html` 的 `out` 目录。
-
-将 npm Bundle 安装到 DSH profile：
+在已有可用 DeepSeek Harness Web profile 的前提下，安装 npm Bundle：
 
 ```bash
 dsh plugin --profile web add dsh-with-pencil@beta
 ```
 
-随后重启 DSH。npm Bundle 会安装固定版本的官方 `@pen.dev/cli`，但不包含或再分发浏览器
-editor 资源。
+随后重启 DSH，这就是正常情况下的完整安装步骤。npm Bundle 会安装固定版本的官方
+`@pen.dev/cli`。用户第一次打开画布时，插件才会从 pen.dev 官方发行源直接下载 editor
+`0.1.94`，核对固定的 SHA-256 校验值，并原子缓存到
+`~/.dsh/dsh-with-pencil/editor/0.1.94/`。Harness 启动时不会下载或打开画布，之后再次
+打开会直接使用已验证缓存。
+
+npm 包本身不复制或再分发 browser editor。离线环境可以预先下载并解压相同的官方版本，
+再用 `DSH_PEN_EDITOR_DIR` 指向它的 `out` 目录。
 
 从本仓库进行本地开发安装：
 
@@ -282,7 +285,8 @@ dsh plugin --profile web add file:/absolute/path/to/dsh-with-pencil
 
 | 变量 | 说明 |
 |---|---|
-| `DSH_PEN_EDITOR_DIR` | 官方 editor 的 `out` 目录；与会话工作区无关 |
+| `DSH_PEN_EDITOR_DIR` | 可选的离线/开发覆盖项，指向官方 editor 的 `out` 目录 |
+| `DSH_PEN_EDITOR_CACHE_DIR` | 覆盖自动下载缓存根目录；默认 `~/.dsh/dsh-with-pencil/editor` |
 | `DSH_PEN_FILE` | 会话首次打开的 `.pen` 相对路径，默认 `designs/design.pen` |
 | `DSH_PEN_CLI_BIN` / `DSH_PEN_MCP_BIN` | 覆盖官方 CLI/MCP 路径；通常无需设置 |
 | `DSH_PEN_MCP_APP` | 显式连接外部 Pencil app；默认不自动探测 |
@@ -301,7 +305,8 @@ dsh plugin --profile web add file:/absolute/path/to/dsh-with-pencil
 - 工作区 `*.lib.pen` 和官方 CLI 随附的只读库会出现在 editor 设计库列表中。
 - 外部冲突和保存失败会一直显示在顶栏，不会静默覆盖脏文档。
 - 插件退出时会在释放会话前冲洗仍有修改的画布。
-- editor 资源缺失或不兼容时会在打开空白 iframe 前明确失败。
+- 固定版本 editor 只在首次打开画布时下载；下载、校验、解压或兼容性错误会在空白 iframe
+  打开前明确显示。
 - 尚未交付 editor 的取消请求会从队列删除；已交付的请求要求先检查画布状态再重试。
 
 ### 源码结构
@@ -313,6 +318,7 @@ lib/model-tools.js           7 个模型工具与截图附件
 lib/canvas-host.js           会话绑定、磁盘保存与 editor IPC 路由
 lib/canvas-transport.js      请求队列、轮询、取消和响应
 lib/editor-assets.js         官方 editor 定位、注入与静态资源
+lib/editor-installer.js      固定版本下载、校验、安全解压与缓存
 lib/ipc-binary.js            JSON Browser IPC 中的无损二进制传输
 lib/session-store.js         Browser/CLI 登录态复用与安全保存
 lib/workspace-resources.js   导入、生成图片、文件监听与设计库

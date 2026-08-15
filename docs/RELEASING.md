@@ -28,13 +28,12 @@ manual gates:
 
 1. Recheck npm name availability, sign in to the publishing account and enable
    two-factor authentication or trusted publishing.
-2. Confirm with pen.dev that this integration may download/use the official CLI
-   and editor and may inject the local browser bootstrap described in the
-   README. Do not copy either official artifact into this repository or npm
-   tarball.
-3. Decide how users obtain the compatible editor bundle. The beta currently
-   requires `DSH_PEN_EDITOR_DIR`; an installer may download from an official
-   pen.dev URL only after the relevant terms are confirmed.
+2. Recheck the current pen.dev terms for this integration's use of the official
+   CLI and user-initiated editor download. Do not copy either official artifact
+   into this repository or npm tarball.
+3. Confirm the pinned editor URL and SHA-256 against
+   `https://api.pen.dev/public/versions`; a changed artifact requires a new
+   plugin release and the full editor compatibility suite.
 4. Move to an official `@pen.dev/cli` release whose image stack includes a
    patched Sharp/libvips version, or obtain written vendor guidance for the
    pinned version. Do not force a transitive Sharp override without rerunning

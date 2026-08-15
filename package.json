@@ -1,7 +1,7 @@
 {
   "name": "dsh-with-pencil",
   "private": false,
-  "version": "0.5.0-beta.2",
+  "version": "0.5.0-beta.3",
   "description": "Session-aware Pencil integration for DeepSeek Harness with official MCP tools and an on-demand browser canvas.",
   "license": "MIT",
   "repository": {
@@ -59,6 +59,8 @@
     "@pen.dev/cli": "0.3.0"
   },
   "peerDependencies": {
+    "@deepseek-ai/dsh-client-runtime": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-client-ui-conversation": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-tools": "^0.1.0-rc.6",
     "react": "^18.2.0"
   },

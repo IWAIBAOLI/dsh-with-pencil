@@ -119,6 +119,7 @@ let modelToolsSource = ''
 let canvasHostSource = ''
 let canvasTransportSource = ''
 let editorAssetsSource = ''
+let editorInstallerSource = ''
 let sessionStoreSource = ''
 let ipcBinarySource = ''
 let workspaceResourcesSource = ''
@@ -157,6 +158,7 @@ for (const [name, assign] of [
   ['canvas-host.js', (source) => { canvasHostSource = source }],
   ['canvas-transport.js', (source) => { canvasTransportSource = source }],
   ['editor-assets.js', (source) => { editorAssetsSource = source }],
+  ['editor-installer.js', (source) => { editorInstallerSource = source }],
   ['session-store.js', (source) => { sessionStoreSource = source }],
   ['ipc-binary.js', (source) => { ipcBinarySource = source }],
   ['workspace-resources.js', (source) => { workspaceResourcesSource = source }],
@@ -295,6 +297,13 @@ if (!canvasHostSource.includes("path: '/pen-host/save-as'") || !canvasHostSource
 if (!editorAssetsSource.includes('function preflight()') || !canvasHostSource.includes('editorAssets.preflight()')) {
   fail('canvas binding must reject missing or incompatible editor assets before handoff')
 } else ok('canvas binding preflights editor assets before handoff')
+if (!editorAssetsSource.includes('installOfficialEditor') ||
+    !editorInstallerSource.includes("version: '0.1.94'") ||
+    !editorInstallerSource.includes("sha256: '7b655d0ee6b18ca460959573661c250db650538443466c2783dd089d3e4ad22a'") ||
+    !editorInstallerSource.includes('invalid editor ZIP path') ||
+    !editorInstallerSource.includes("'.installed.json'")) {
+  fail('missing editor assets must install one pinned, verified official bundle into a safe cache')
+} else ok('missing editor assets install one pinned, verified official bundle into a safe cache')
 if (!canvasHostSource.includes('saveError: binding.saveError') || !canvasHostSource.includes('rejectSaveWaiters(binding, error)') || !canvasHostSource.includes('ctx.effect(() => async () =>')) {
   fail('save failures must be observable and dirty canvases flushed during async shutdown')
 } else ok('save failures are observable and dirty canvases flush during async shutdown')

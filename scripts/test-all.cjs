@@ -8,6 +8,7 @@ const root = path.resolve(__dirname, '..')
 const checks = [
   'scripts/verify.cjs',
   'scripts/pack-check.cjs',
+  'tests/editor-installer.test.mjs',
   'tests/host-components.test.mjs',
   'tests/workspace-path.test.mjs',
   'tests/workspace-resources.test.mjs',

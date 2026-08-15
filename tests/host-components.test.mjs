@@ -32,7 +32,7 @@ try {
     bindingOf(req) { return new URL(req.url, 'http://127.0.0.1').searchParams.get('binding') === binding.key ? binding : undefined },
     urlOf(req) { return new URL(req.url, 'http://127.0.0.1') },
   })
-  assert.equal(assets.preflight().directory, editorDir)
+  assert.equal((await assets.preflight()).directory, editorDir)
 
   const indexResponse = response()
   await assets.serve({ url: '/pen-editor/index.html?binding=binding-token' }, indexResponse)
@@ -46,6 +46,18 @@ try {
   assert.equal(assetResponse.status, 200)
   assert.equal(assetResponse.headers['Content-Type'], 'text/javascript')
   assert.equal(assetResponse.body, 'window.editorLoaded = true')
+
+  delete process.env.DSH_PEN_EDITOR_DIR
+  let installCalls = 0
+  const downloadedAssets = createEditorAssets({
+    bindingOf() { return binding },
+    urlOf(req) { return new URL(req.url, 'http://127.0.0.1') },
+    editorDirectories: [],
+    async editorInstaller() { installCalls += 1; return editorDir },
+  })
+  assert.equal((await downloadedAssets.preflight()).directory, editorDir)
+  assert.equal((await downloadedAssets.preflight()).directory, editorDir)
+  assert.equal(installCalls, 1, 'resolved downloaded assets must be reused')
 
   const sessionStore = createSessionStore()
   assert.equal(sessionStore.set({ email: 'agent@example.com', token: 'secret-token' }), true)
