@@ -123,6 +123,7 @@ let editorInstallerSource = ''
 let sessionStoreSource = ''
 let ipcBinarySource = ''
 let workspaceResourcesSource = ''
+let clientSource = ''
 try {
   const pluginPath = path.join(root, 'lib/index.js')
   execFileSync(process.execPath, ['--check', pluginPath], { stdio: 'pipe' })
@@ -201,6 +202,7 @@ try {
   if (!pkg.exports || pkg.exports['./client'] !== './lib/client.js') fail('package must export "./client" -> ./lib/client.js')
   else ok('exports["./client"] -> lib/client.js')
   const client = fs.readFileSync(path.join(root, 'lib/client.js'), 'utf8')
+  clientSource = client
   if (!client.startsWith('window.__ModuleLoader__.load({')) fail('client bundle must start with the __ModuleLoader__.load wrap')
   else ok('client bundle wrapped for the web loader')
   if (client.includes('store.setOpen(true)')) fail('client must not auto-open the canvas during plugin activation')
@@ -297,6 +299,12 @@ if (!canvasHostSource.includes("path: '/pen-host/save-as'") || !canvasHostSource
 if (!editorAssetsSource.includes('function preflight()') || !canvasHostSource.includes('editorAssets.preflight()')) {
   fail('canvas binding must reject missing or incompatible editor assets before handoff')
 } else ok('canvas binding preflights editor assets before handoff')
+if (!editorAssetsSource.includes("method: 'color-theme-changed'") ||
+    !editorAssetsSource.includes("matchMedia('(prefers-color-scheme: dark)')") ||
+    !editorAssetsSource.includes('new MutationObserver') ||
+    clientSource.includes('penhost-theme-toggle')) {
+  fail('canvas and editor must follow the resolved Harness/system theme without a plugin theme control')
+} else ok('canvas and editor follow the resolved Harness/system theme without a plugin theme control')
 if (!editorAssetsSource.includes('installOfficialEditor') ||
     !editorInstallerSource.includes("version: '0.1.94'") ||
     !editorInstallerSource.includes("sha256: '7b655d0ee6b18ca460959573661c250db650538443466c2783dd089d3e4ad22a'") ||

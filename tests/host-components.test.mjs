@@ -39,6 +39,9 @@ try {
   assert.equal(indexResponse.status, 200)
   assert.match(String(indexResponse.body), /var __penBinding = "binding-token"/)
   assert.match(String(indexResponse.body), /function __penPoll\(\)/)
+  assert.match(String(indexResponse.body), /method: 'color-theme-changed'/)
+  assert.match(String(indexResponse.body), /new MutationObserver/)
+  assert.match(String(indexResponse.body), /prefers-color-scheme: dark/)
   assert.ok(String(indexResponse.body).indexOf('function __penPoll()') < String(indexResponse.body).indexOf('<script type="module"'))
 
   const assetResponse = response()

@@ -4,6 +4,13 @@ All notable changes to this project are documented here. Versions follow
 [Semantic Versioning](https://semver.org/); prereleases are published under the
 `beta` npm dist-tag.
 
+## 0.5.0-beta.4 - 2026-08-15
+
+- Make the canvas chrome and embedded Pencil editor follow the resolved Harness
+  light/dark theme automatically, including live system-theme changes.
+- Remove light-only iframe and hover colors without adding a separate Pencil
+  theme preference or manual plugin control.
+
 ## 0.5.0-beta.3 - 2026-08-15
 
 - Make the normal installation genuinely one command: the first explicit

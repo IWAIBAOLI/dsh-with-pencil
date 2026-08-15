@@ -138,6 +138,8 @@ The development-only profile fixture is available at
 
 - The first open uses a 42% right split. Resizing persists as a viewport ratio;
   the canvas can also float.
+- The canvas chrome and Pencil editor follow the active Harness/system light or
+  dark theme automatically; the plugin adds no separate theme control.
 - The toolbar contains workspace, `.pen` file, layout, and close controls.
 - The editor iframe stays mounted within its conversation, including when the
   Agent changes the active file.
@@ -309,6 +311,7 @@ npx @deepseek-ai/dsh plugin --profile web add file:/absolute/path/to/dsh-with-pe
 ### 画布行为
 
 - 首次打开为 42% 右侧分屏；拖动后按视口比例保存，也可切成浮动窗口。
+- 画布外框和 Pencil editor 自动跟随 Harness/系统的明暗主题；插件不增加单独的主题开关。
 - 顶栏提供工作区、`.pen` 文件、布局和关闭操作。
 - editor iframe 在当前会话中保持挂载，Agent 切换文件时不会因重建 iframe 丢失引擎。
 - 用户手工编辑每 6 秒触发保存；Agent 编辑逐次等待保存确认。
