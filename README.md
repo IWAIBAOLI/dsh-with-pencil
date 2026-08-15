@@ -43,14 +43,15 @@ The plugin registers seven core model tools:
 Send this prompt once in a normal Harness conversation:
 
 > Create and validate a custom Harness Agent Preset named **Pencil Designer**
-> from the standard coding preset, retaining its existing tools. Add a persona
-> that uses the installed `pencil_mcp_*` tools directly for `.pen` work
-> (`pencil_mcp_open`, `pencil_mcp_get_app_state`, `pencil_mcp_execute`, and
-> `pencil_mcp_get_screenshot`), never searches for another Pencil
-> plugin/MCP/CLI, and never edits `.pen` JSON manually. Reuse an
-> available vision model or image plugin; if none exists, ask me. Actually
-> create the preset and tell me how to select it—do not merely explain the
-> steps or modify other presets.
+> with a minimal toolset: the installed `pencil_mcp_*` tools, one existing
+> vision model/image plugin, and only the user-question tool they require.
+> Exclude shell, web, source search, package/plugin/MCP/Profile management, and
+> every other design tool. During creation, resolve the exact vision tool and
+> write its name into the persona; if none exists, ask me. The preset Agent must
+> execute `.pen` tasks directly from the supplied tool schemas—never discover
+> tools, inspect source code, edit `.pen` JSON, or use a design tool not named
+> by the persona. Actually create and validate the preset, then tell me how to
+> select it; do not merely explain or modify other presets.
 
 Five legacy one-shot CLI helpers are hidden by default to avoid duplicated
 capabilities and irrelevant model context. Set `DSH_PEN_LEGACY_TOOLS=1` only
@@ -254,13 +255,13 @@ not. See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 
 在普通 Harness 会话中发送一次以下提示词：
 
-> 请以标准编码 preset 为基础，创建并校验一个名为 **Pencil 设计** 的 Harness Agent
-> Preset，保留其原有工具。为它添加 persona：处理 `.pen` 时直接使用已安装的
-> `pencil_mcp_*` 工具（`pencil_mcp_open`、`pencil_mcp_get_app_state`、
-> `pencil_mcp_execute`、`pencil_mcp_get_screenshot`），不搜索其他 Pencil
-> 插件/MCP/CLI，也不手改 `.pen` JSON；复用现有视觉模型或图像插件，
-> 如果没有就先询问我。请实际创建 preset 并告诉我如何选择；不要只讲步骤，也不要修改
-> 其他 preset。
+> 请创建并校验一个名为 **Pencil 设计** 的 Harness Agent Preset。只保留已安装的
+> `pencil_mcp_*`、一个现有视觉模型/图像插件及其必需的询问用户工具；禁用 shell、Web、
+> 源码搜索、包/插件/MCP/Profile 管理和其他设计工具。创建时确定视觉工具的准确名称并写入
+> persona；如果没有就先询问我。Preset Agent 必须直接按照给定工具 schema 执行 `.pen`
+> 任务，不得自行发现工具、翻源码、手改 `.pen` JSON，也不得使用 persona 未指定的设计
+> 工具。请实际创建并校验 preset，再告诉我如何选择；不要只讲步骤，也不要修改其他
+> preset。
 
 为避免重复能力和无关上下文，5 个旧的一次性 CLI 助手默认隐藏。仅在兼容需要时设置
 `DSH_PEN_LEGACY_TOOLS=1`，恢复 `status`、`login`、`workspaces`、`design` 和
