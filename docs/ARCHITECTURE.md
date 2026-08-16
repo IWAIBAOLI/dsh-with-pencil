@@ -71,10 +71,18 @@ retries; `export_nodes`/`export_html` return a clear failure message.
 dsh-with-pencil; default `text`). Future visual adaptations hang off it.
 It is a user preference in the `pencil` settings namespace, registered by the
 plugin through the Host settings service (`ctx.settings.register`); the patch
-layer's `config.visionMode` only seeds the composition base. The client card
-(`settings.plugin.item`) writes through the settings scope, and a namespace
-watcher flips the live `vision.mode` holder, so a save takes effect without a
-restart.
+layer's `config.visionMode` only seeds the composition base.
+
+The API proxy deliberately serves settings describe/mutate only for
+configurable-provider namespaces plus a fixed allowlist
+(`WEB_SETTINGS_NAMESPACES` / `PRODUCT_SETTINGS_NAMESPACES`). A third-party
+plugin therefore exposes its namespace through the llm configurable-provider
+directory (`ctx.llm.registerConfigurableProviders` with `settingsNs`), the
+same mechanism dsh-vision-router uses for its card; without that directory
+entry the client's settings scope reports the namespace as unavailable. The
+client card (`settings.plugin.item`) writes through the settings scope, and a
+namespace watcher flips the live `vision.mode` holder, so a save takes effect
+without a restart.
 
 - **`text`** (DeepSeek and other non-multimodal models): image transcription
   needs clarity, so screenshots route to high-resolution rendering:

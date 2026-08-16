@@ -100,9 +100,9 @@ try {
     fail('bundle patch must insert { id: dsh-with-pencil, name: dsh-with-pencil }')
   } else ok('bundle patch inserts dsh-with-pencil row')
   const patch = patchText('cordis.patch.yml')
-  if (!patch.includes("inject: ['tools', 'subprocess', 'sandboxPolicy', 'webServer', 'sessions', 'attachments', 'systemPrompt']") && !patch.includes('inject: ["tools", "subprocess", "sandboxPolicy", "webServer", "sessions", "attachments", "systemPrompt"]')) {
+  if (!patch.includes("inject: ['tools', 'llm', 'subprocess', 'sandboxPolicy', 'webServer', 'sessions', 'attachments', 'systemPrompt']") && !patch.includes('inject: ["tools", "llm", "subprocess", "sandboxPolicy", "webServer", "sessions", "attachments", "systemPrompt"]')) {
     fail('bundle patch row must inject tool, process, web, session, attachment, and system-prompt services')
-  } else ok('bundle patch row injects tool, process, web, session, attachment, and system-prompt services')
+  } else ok('bundle patch row injects tool, llm, process, web, session, attachment, and system-prompt services')
 } catch (err) { fail('bundle patch: ' + err.message) }
 try {
   parseYaml('profiles/dsh-with-pencil-template/cordis.yml')
