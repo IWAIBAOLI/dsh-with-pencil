@@ -227,7 +227,7 @@ try {
   if (!client.includes('var(--dsw-specific-menu') || !client.includes('var(--dsw-shadow-lv3') || !client.includes('var(--dsw-alias-interactive-bg-hover') || client.includes('0 12px 32px rgba(0,0,0,.42)')) {
     fail('canvas dropdowns must use the resolved Harness menu surface and elevation tokens')
   } else ok('canvas dropdowns use the resolved Harness menu surface and elevation tokens')
-  if (!client.includes('function useHarnessLanguage(locale)') || !client.includes('locale.subscribe(listener)') || !client.includes('locale.getSnapshot()') || !client.includes("const inject = ['slots', 'locale']") || client.includes("attributeFilter: ['lang']") || !client.includes("openWorkspace: 'Open workspace folder'") || !client.includes("canvas: 'pen.dev Canvas'") || !client.includes("float: 'Float'")) {
+  if (!client.includes('function useHarnessLanguage(locale)') || !client.includes('locale.subscribe(listener)') || !client.includes('locale.getSnapshot()') || !client.includes("const inject = ['slots', 'locale', 'settingsScope']") || client.includes("attributeFilter: ['lang']") || !client.includes("openWorkspace: 'Open workspace folder'") || !client.includes("canvas: 'pen.dev Canvas'") || !client.includes("float: 'Float'")) {
     fail('all plugin-owned canvas controls must subscribe to the Harness locale service')
   } else ok('all plugin-owned canvas controls subscribe to the Harness locale service')
   if (!client.includes('.dsh-penhost-control {') || !client.includes("const className = 'dsh-penhost-control dsh-penhost-header-btn'") || !client.includes("className: 'dsh-penhost-control dsh-penhost-mode'")) {

@@ -108,6 +108,9 @@ when compatibility requires `status`, `login`, `workspaces`, `design`, and
   reach the model only as markers.
 - `multimodal` — native screenshots; the model sees the pixels itself.
 
+The setting card lives in **Settings → Plugins → dsh-with-pencil** and takes
+effect immediately after saving. First installs default to `text`.
+
 For implementation details see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ### Install the beta
@@ -282,6 +285,9 @@ not. See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
   **本插件不提供图片转译模块**：转译依赖部署方的视觉插件（如 `dsh-vision-proxy`）；
   没有视觉插件时，图片对模型只显示为标记。
 - `multimodal` — 使用原生截图，模型自己看像素。
+
+配置卡片位于 **设置 → 插件 → dsh-with-pencil**，保存后立即生效；首次安装默认
+`text`。
 
 实现细节见 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)。
 

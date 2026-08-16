@@ -69,6 +69,12 @@ retries; `export_nodes`/`export_html` return a clear failure message.
 
 `visionMode` is a global vision-capability setting (Settings → Plugins →
 dsh-with-pencil; default `text`). Future visual adaptations hang off it.
+It is a user preference in the `pencil` settings namespace, registered by the
+plugin through the Host settings service (`ctx.settings.register`); the patch
+layer's `config.visionMode` only seeds the composition base. The client card
+(`settings.plugin.item`) writes through the settings scope, and a namespace
+watcher flips the live `vision.mode` holder, so a save takes effect without a
+restart.
 
 - **`text`** (DeepSeek and other non-multimodal models): image transcription
   needs clarity, so screenshots route to high-resolution rendering:
