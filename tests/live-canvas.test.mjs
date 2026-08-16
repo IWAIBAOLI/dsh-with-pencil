@@ -173,6 +173,7 @@ let liveDocument = { version: '2.14', children: [], fileToken: 'canvas-test' }
 let liveFile = path.join(workspace, 'designs', 'design.pen')
 let canvasMutations = 0
 let selectedElements = []
+let exportNodeCalls = 0
 let invalidNextSave = false
 let pauseAfterBatch = false
 let pausedResolve
@@ -230,6 +231,7 @@ async function fakeEditor() {
       } else if (message.method === 'get-screenshot') {
         await postIpc({ id: message.id, type: 'response', method: message.method, payload: { success: true, result: { image: 'iVBORw0KGgo=', mimeType: 'image/png' } } })
       } else if (message.method === 'export-nodes') {
+        exportNodeCalls += 1
         const format = message.payload.format || 'png'
         const bytes = Buffer.from(format + ':' + message.payload.nodeIds.join(','))
         await postIpc({
@@ -352,10 +354,17 @@ try {
   assert.match(reopened.text, /DiskWins/)
   assert.match(reopened.text, /LocalWins/)
 
+  const exportCallsBeforeScreenshot = exportNodeCalls
   const screenshot = await call('pencil_mcp_get_screenshot', { filePath: 'one.pen', nodeId: 'document' })
+  assert.ok(exportNodeCalls > exportCallsBeforeScreenshot, 'document screenshots must export top-level nodes through the live canvas')
   assert.equal(screenshot.image.attachmentId, 'test-image-1')
   const screenshotBlocks = tools.get('pencil_mcp_get_screenshot').output.render({}, screenshot)
   assert.equal(screenshotBlocks.some((block) => block.type === 'image'), true)
+  assert.deepEqual(
+    fs.readdirSync(workspace).filter((f) => f.startsWith('.pen-doc-') || f.startsWith('.pen-shot-')),
+    [],
+    'screenshot temp dirs must be removed right after use',
+  )
 
   const paused = new Promise((resolve) => { pausedResolve = resolve })
   pauseAfterBatch = true
