@@ -61,7 +61,12 @@ Send this prompt once in a normal Harness conversation:
 >
 > The persona must require the Agent, when starting a new design, to first use
 > `pencil_mcp_open` to create a `.pen` file inside the workspace, then edit, take
-> screenshots, and visually verify it until it is saved. Do not use unspecified
+> screenshots, and visually verify it until it is saved. Verify visually with
+> `pencil_mcp_get_screenshot` (a visual-fidelity spot check: colors, font
+> rendering, alignment/spacing, layout positions; large nodes render at high
+> resolution automatically). Verify text and property content with
+> `pencil_mcp_batch_get` (node reads). Use
+> `pencil_mcp_export_nodes` only for deliverable files. Do not use unspecified
 > design tools or inspect any source code or repository to find tools or study
 > their usage. Prefer the assigned design tools for `.pen` edits; do not treat
 > direct JSON editing as the default.
@@ -74,51 +79,36 @@ capabilities and irrelevant model context. Set `DSH_PEN_LEGACY_TOOLS=1` only
 when compatibility requires `status`, `login`, `workspaces`, `design`, and
 `export`.
 
-### Runtime boundaries
+### Model tools
 
-- `@pen.dev/cli@0.3.0` is the official package that supplies the headless engine
-  and MCP server.
-- Editor `0.1.94` is the compatible official browser editor bundle used for
-  canvas rendering and interaction.
-- This repository supplies the DSH tool registration, conversation/workspace
-  binding, Browser UI, editor IPC, save verification, and screenshot attachment
-  integration.
-- An external Pencil app is never auto-detected. It is used only when
-  `DSH_PEN_MCP_APP` is explicitly configured.
+- `pencil_mcp_open` — open/switch the conversation's `.pen` file; call FIRST
+  for any design work.
+- `pencil_mcp_get_app_state` — current document state; `include_schema: true`
+  returns the `.pen` schema.
+- `pencil_mcp_batch_get` — read node data (text content, properties) by ID or
+  pattern — the authoritative way to verify text and attribute values.
+- `pencil_mcp_get_guidelines` — design guides and styles.
+- `pencil_mcp_execute` — edit the document with a JS snippet
+  (`Update`/`Insert`/`Copy`/`Delete`/`Move`/`Set`/`Replace`).
+- `pencil_mcp_get_screenshot` — visual-fidelity spot check (colors, fonts,
+  alignment). Large nodes and whole documents render at high resolution
+  automatically; with the canvas closed you get a compressed screenshot and a
+  hint to open the canvas.
+- `pencil_mcp_export_html` — export nodes to HTML.
+- `pencil_mcp_export_nodes` — export nodes to image files (deliverables).
 
-The `.pen` schema is pinned to `2.14`. Do not upgrade the CLI or editor without
-testing schema and IPC compatibility on both sides; incompatible combinations
-can fail to open files or overwrite them incorrectly.
+### Configuration
 
-### How it works
+`visionMode` (Settings → Plugins → dsh-with-pencil, default `text`):
 
-- Harness startup neither selects a workspace nor opens the canvas.
-- The first in-conversation canvas action binds to the workspace of the real
-  Harness session. A browser-supplied path cannot replace that boundary.
-- With the canvas open, MCP edits run through that conversation's visible
-  editor. A tool succeeds only after `save-resource` reaches disk and the saved
-  JSON is parsed again.
-- With the canvas closed, the plugin starts the official headless engine. It
-  opens existing files with `interactive --in <file> --out <file>`, sends
-  `save()` after edits, waits for the acknowledgement, and verifies the file.
-- The official CLI shares a global `pencil-cli.sock`, so headless operations and
-  engine handoffs are serialized. Independent live canvases keep separate
-  queues.
-- The headless snippet API is a strict subset of the official DSL: only
-  `Update`, `Insert`, `Copy`, `Delete`, `Move`, `Set`, and `Replace` are
-  defined. `Get`/`Print` (advertised in official docs) throw `ReferenceError`
-  and roll back the whole call, so the plugin's tool description and
-  `get_app_state` results state the real list instead of deferring to the
-  official documentation chain.
+- `text` — for DeepSeek and other non-multimodal models. Screenshots route to
+  high-resolution rendering so image transcription stays reliable. Image
+  transcription itself is **not provided by this plugin**: it depends on the
+  deployment's vision plugin (e.g. `dsh-vision-proxy`). Without one, images
+  reach the model only as markers.
+- `multimodal` — native screenshots; the model sees the pixels itself.
 
-Model paths, browser IPC paths, imports, and exports are restricted to the
-owning conversation workspace, including symlink-aware escape checks. Browser
-credentials are atomically persisted with mode `0600`.
-
-Selected nodes are injected into the next Agent turn with the current `.pen`
-file and node IDs. Clean canvases reload external file changes automatically;
-dirty canvases stop saving and ask which version to keep. Script references are
-refreshed through the editor's `watch-file` protocol.
+For implementation details see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ### Install the beta
 
@@ -203,42 +193,8 @@ The development-only profile fixture is available at
 - Cancelled requests that have not reached the editor are removed from its
   queue; delivered requests require a canvas-state check before retrying.
 
-### Source layout
-
-```text
-lib/index.js                 Runtime composition and dependency resolution
-lib/headless-runtime.js      Official CLI/MCP engine lifecycle
-lib/model-tools.js           Seven model tools and screenshot attachments
-lib/canvas-host.js           Session binding, persistence, and editor IPC routes
-lib/canvas-export.js         Live selection/document PNG and PDF export
-lib/canvas-transport.js      Request queues, polling, cancellation, responses
-lib/editor-assets.js         Official editor discovery, injection, static files
-lib/editor-installer.js      Pinned download, verification, safe extraction, cache
-lib/ipc-binary.js            Lossless binary values over JSON browser IPC
-lib/session-store.js         Browser/CLI login reuse and secure persistence
-lib/workspace-resources.js   Imports, generated images, watchers, libraries
-lib/workspace-path.js        Session workspace and path boundaries
-lib/legacy-tools.js          Optional one-shot CLI helpers
-lib/client.js                Harness split/floating canvas UI
-cordis.patch.yml             DSH Bundle and Host service injection
-profiles/dsh-with-pencil-template/  Development profile fixture
-tests/                       Protocol, persistence, path, and resource tests
-```
-
-### Verification and licensing
-
-```bash
-npm test
-npm run release:check
-```
-
-Tests simulate real Agent calls and official editor IPC, including live edits,
-selection context, atomic saves, external reloads, conflicts, Save As, live
-PNG/PDF export, screenshots, cancellation, imports, generated assets, libraries,
-and binary IPC.
-CI covers Node 22 and 24 on macOS and Linux.
-
-See [`docs/RELEASING.md`](docs/RELEASING.md) for release gates and rollback.
+Maintainers: see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the
+runtime design and [`docs/RELEASING.md`](docs/RELEASING.md) for release gates.
 This integration is MIT licensed; official pen.dev and DeepSeek components are
 not. See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 
@@ -291,9 +247,12 @@ not. See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 > 用法，不得再去其他地方查找、试探测或验证用法。
 >
 > Persona 应要求 Agent 在新建设计时，先用 `pencil_mcp_open` 创建工作区内的 `.pen`
-> 文件，再使用指定工具编辑、截图并进行视觉验证，直至保存完成。不得使用未指定的设计
-> 工具，不得通过翻查任何源码或仓库来寻找工具、研究用法。编辑 `.pen` 时优先使用指定
-> 设计工具，不把直接修改 JSON 作为默认方式。
+> 文件，再使用指定工具编辑、截图并进行视觉验证，直至保存完成。视觉验证使用
+> `pencil_mcp_get_screenshot` 做视觉保真抽查（颜色、字体渲染、对齐/间距、布局
+> 位置；大节点与整文档自动走高清渲染）。文字与属性内容用
+> `pencil_mcp_batch_get` 按节点读取验证。`pencil_mcp_export_nodes` 仅用于交付
+> 文件产物。不得使用未指定的设计工具，不得通过翻查任何源码或仓库来寻找工具、研究
+> 用法。编辑 `.pen` 时优先使用指定设计工具，不把直接修改 JSON 作为默认方式。
 >
 > 创建完成后，报告 Preset 名称或路径、绑定的视觉工具和选择方法；不要修改其他 Preset。
 
@@ -301,34 +260,30 @@ not. See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 `DSH_PEN_LEGACY_TOOLS=1`，恢复 `status`、`login`、`workspaces`、`design` 和
 `export`。
 
-### 组成与边界
+### 模型工具
 
-- `@pen.dev/cli@0.3.0` 是官方包，提供 headless 引擎和 MCP server。
-- editor `0.1.94` 是兼容的官方浏览器 editor bundle，负责画布渲染和交互。
-- 本仓库负责 DSH 工具注册、会话/工作区绑定、Browser UI、editor IPC、保存确认和截图附件。
-- 默认不会探测外部 Pencil app；只有显式设置 `DSH_PEN_MCP_APP` 才会连接。
+- `pencil_mcp_open` — 打开/切换会话的 `.pen` 文件；任何设计任务先调用它。
+- `pencil_mcp_get_app_state` — 当前文档状态；`include_schema: true` 返回 `.pen` schema。
+- `pencil_mcp_batch_get` — 按节点 ID/模式读取节点数据（文字内容、属性）——验证文字与
+  属性值的权威方式。
+- `pencil_mcp_get_guidelines` — 设计指南与样式。
+- `pencil_mcp_execute` — 用 JS 片段编辑文档（`Update`/`Insert`/`Copy`/`Delete`/
+  `Move`/`Set`/`Replace`）。
+- `pencil_mcp_get_screenshot` — 视觉保真抽查（颜色、字体、对齐）。大节点与整文档自动
+  走高清渲染；画布未打开时返回压缩截图并提示打开画布。
+- `pencil_mcp_export_html` — 导出节点为 HTML。
+- `pencil_mcp_export_nodes` — 导出节点为图片文件（交付物）。
 
-`.pen` schema 固定为 `2.14`。升级 CLI 或 editor 前必须验证双方的 schema 和 IPC 兼容性，
-否则可能无法打开文件或错误覆盖文件。
+### 配置
 
-### 工作方式
+`visionMode`（设置 → 插件 → dsh-with-pencil，默认 `text`）：
 
-- Harness 启动时不选择工作区，也不默认打开画布。
-- 用户首次在会话内触发画布后，Host 绑定 Harness 真实 session 的工作区；浏览器传入的路径
-  不能替代这个边界。
-- 画布打开时，MCP 编辑进入该会话可见的 editor。工具只有在 `save-resource` 落盘并重新解析
-  保存后的 JSON 后才返回成功。
-- 画布关闭时，插件启动官方 headless 引擎。已有文件通过
-  `interactive --in <file> --out <file>` 打开；编辑后发送 `save()`、等待回执并验证磁盘文件。
-- 官方 CLI 共用全局 `pencil-cli.sock`，因此 headless 操作和引擎交接串行执行；不同 live
-  canvas 使用各自的队列。
+- `text` — 适用于 DeepSeek 等非多模态模型。截图自动走高清渲染，保证图片转译的可靠性。
+  **本插件不提供图片转译模块**：转译依赖部署方的视觉插件（如 `dsh-vision-proxy`）；
+  没有视觉插件时，图片对模型只显示为标记。
+- `multimodal` — 使用原生截图，模型自己看像素。
 
-模型、浏览器 IPC、导入和导出路径都被限制在所属会话工作区内，并检查符号链接逃逸。
-浏览器凭据使用原子替换保存，权限为 `0600`。
-
-画布选区会在下一轮 Agent 启动时作为动态上下文注入，包含当前 `.pen` 文件和节点 ID。
-外部修改文件时，干净画布自动重载；存在未保存修改时暂停保存并要求选择磁盘或画布版本。
-Script 引用文件通过 editor 的 `watch-file` 协议实时刷新。
+实现细节见 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)。
 
 ### 安装 beta
 
@@ -396,39 +351,7 @@ npx @deepseek-ai/dsh plugin --profile web add file:/absolute/path/to/dsh-with-pe
   打开前明确显示。
 - 尚未交付 editor 的取消请求会从队列删除；已交付的请求要求先检查画布状态再重试。
 
-### 源码结构
-
-```text
-lib/index.js                 运行边界编排与依赖解析
-lib/headless-runtime.js      官方 CLI/MCP 引擎生命周期
-lib/model-tools.js           7 个模型工具与截图附件
-lib/canvas-host.js           会话绑定、磁盘保存与 editor IPC 路由
-lib/canvas-export.js         当前选区/文档的 PNG 与 PDF 导出
-lib/canvas-transport.js      请求队列、轮询、取消和响应
-lib/editor-assets.js         官方 editor 定位、注入与静态资源
-lib/editor-installer.js      固定版本下载、校验、安全解压与缓存
-lib/ipc-binary.js            JSON Browser IPC 中的无损二进制传输
-lib/session-store.js         Browser/CLI 登录态复用与安全保存
-lib/workspace-resources.js   导入、生成图片、文件监听与设计库
-lib/workspace-path.js        session 工作区和路径边界
-lib/legacy-tools.js          可选的一次性 CLI 助手
-lib/client.js                Harness 分屏/浮动画布 UI
-cordis.patch.yml             DSH Bundle 与 Host 服务注入
-profiles/dsh-with-pencil-template/  开发 profile 模板
-tests/                       协议、保存、路径和资源测试
-```
-
-### 验证与许可
-
-```bash
-npm test
-npm run release:check
-```
-
-测试模拟真实 Agent 调用和官方 editor IPC，覆盖实时编辑、选区上下文、原子保存、外部重载、
-冲突、另存为、实时 PNG/PDF 导出、截图、取消、资源导入、生成图片、设计库和二进制 IPC。
-CI 在 macOS 与 Linux 上覆盖 Node 22/24。
-
-发布门槛和回滚步骤见 [`docs/RELEASING.md`](docs/RELEASING.md)。本对接代码采用 MIT 许可；
+维护者请参阅 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)（运行时设计）和
+[`docs/RELEASING.md`](docs/RELEASING.md)（发布门槛）。本对接代码采用 MIT 许可；
 官方 pen.dev 与 DeepSeek 组件不属于该许可，详见
 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。

@@ -15,3 +15,5 @@
     - id: dsh-with-pencil
       name: 'dsh-with-pencil'
       inject: ['tools', 'subprocess', 'sandboxPolicy', 'webServer', 'sessions', 'attachments', 'systemPrompt']
+      config:
+        visionMode: text

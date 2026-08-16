@@ -8,9 +8,11 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 const toolFixture = new URL('./fixtures/dsh-tools.mjs', import.meta.url).href
+const schemasteryFixture = new URL('./fixtures/schemastery.mjs', import.meta.url).href
 registerHooks({
   resolve(specifier, context, nextResolve) {
     if (specifier === '@deepseek-ai/dsh-tools') return { url: toolFixture, shortCircuit: true }
+    if (specifier === 'schemastery') return { url: schemasteryFixture, shortCircuit: true }
     return nextResolve(specifier, context)
   },
 })
@@ -28,8 +30,75 @@ const routes = new Map()
 const cleanups = []
 const eventHandlers = new Map()
 const sessions = new Map([['canvas-agent', { header: { cwd: workspace } }]])
-let subprocessSpawns = 0
 let savedImages = 0
+let headlessSpawns = 0
+// Screenshots now run on the shared headless engine (the webview screenshot
+// is a viewport image that ignores nodeId), so `subprocess.spawn` must answer
+// with a working CLI/MCP pair instead of refusing to start.
+const headlessDocs = new Map()
+function headlessHandle(spec) {
+  headlessSpawns += 1
+  const argv = spec.argv || []
+  const isMcp = argv.some((arg) => arg === '--app')
+  if (spec.signal && spec.signal.aborted) throw new Error('aborted before spawn: ' + String(spec.signal.reason ?? 'aborted'))
+  const stdout = new EventEmitter()
+  const outIndex = argv.indexOf('--out')
+  const engineFile = outIndex >= 0 ? argv[outIndex + 1] : null
+  if (!isMcp && engineFile && !headlessDocs.has(engineFile)) headlessDocs.set(engineFile, { version: '2.14', children: [] })
+  const emit = (chunk) => setTimeout(() => stdout.emit('data', Buffer.from(chunk)), 1)
+  const respond = (id, result) => emit(JSON.stringify({ jsonrpc: '2.0', id, result }) + '\n')
+  const write = (chunk) => {
+    if (isMcp) {
+      for (const line of String(chunk).trim().split('\n')) {
+        if (!line.trim()) continue
+        let request
+        try { request = JSON.parse(line) } catch { continue }
+        if (request.method === 'initialize') respond(request.id, { protocolVersion: '2024-11-05', capabilities: {}, serverInfo: { name: 'fake-mcp', version: '0.0.1' } })
+        else if (request.method === 'tools/list') {
+          respond(request.id, { tools: [
+            { name: 'batch_design', description: 'x', inputSchema: { type: 'object', properties: {}, required: [] } },
+            { name: 'get_editor_state', description: 'x', inputSchema: { type: 'object', properties: {}, required: [] } },
+            { name: 'get_screenshot', description: 'x', inputSchema: { type: 'object', properties: {}, required: [] } },
+          ] })
+        } else if (request.method === 'tools/call') {
+          const { name, arguments: args } = request.params || {}
+          const file = (args && args.filePath) || engineFile
+          const doc = headlessDocs.get(file) || (headlessDocs.set(file, { version: '2.14', children: [] }), headlessDocs.get(file))
+          if (name === 'get_screenshot') {
+            respond(request.id, { content: [{ type: 'image', data: 'iVBORw0KGgo=', mimeType: 'image/png' }], isError: false })
+          } else if (name === 'get_editor_state') {
+            respond(request.id, { content: [{ type: 'text', text: '## Currently active editor\n- ' + file + '\n\n### Top-Level Nodes (' + doc.children.length + '):\n' }], isError: false })
+          } else if (name === 'batch_design') {
+            doc.children.push({ id: 'node-' + (doc.children.length + 1), type: 'frame', name: 'mock' })
+            respond(request.id, { content: [{ type: 'text', text: 'OK' }], isError: false })
+          } else {
+            respond(request.id, { content: [{ type: 'text', text: 'unhandled ' + name }], isError: true })
+          }
+        }
+      }
+      return
+    }
+    if (String(chunk).includes('save()') && engineFile) {
+      const doc = headlessDocs.get(engineFile) || { version: '2.14', children: [] }
+      headlessDocs.set(engineFile, doc)
+      const content = JSON.stringify(doc)
+      fs.writeFileSync(engineFile, content)
+      emit('Saved ' + engineFile + ' (' + Buffer.byteLength(content) + ' bytes, ' + doc.children.length + ' top-level nodes).\n')
+    }
+  }
+  setTimeout(() => { if (!isMcp) emit('[INFO] Ready.\n') }, 1)
+  let doneResolve
+  const done = new Promise((resolve) => { doneResolve = resolve })
+  return {
+    pid: 1,
+    stdin: { write, on() {}, end() {} },
+    stdout,
+    stderr: new EventEmitter(),
+    collected: { stdout: { readFrom() { return { text: '' } } }, stderr: { readFrom() { return { text: '' } } } },
+    done,
+    terminate() { doneResolve({ exitCode: 0, signalCode: null, aborted: false }) },
+  }
+}
 
 const webServer = {
   register(route) {
@@ -42,7 +111,7 @@ const webServer = {
 const ctx = {
   sessions: { get(sessionId) { return sessions.get(sessionId) } },
   get(name) {
-    if (name === 'subprocess') return { spawn() { subprocessSpawns += 1; throw new Error('headless subprocess must not start while canvas is live') } }
+    if (name === 'subprocess') return { spawn(spec) { return headlessHandle(spec) } }
     if (name === 'sandboxPolicy') return { resolve: () => ({ workspaceRoot: workspace }) }
     if (name === 'webServer') return webServer
     if (name === 'attachments') return {
@@ -299,7 +368,7 @@ try {
   controller.abort('test cancellation')
   const cancelledResult = await cancelled
   assert.equal(cancelledResult.ok, false)
-  assert.match(cancelledResult.text, /cancelled before delivery/)
+  assert.match(cancelledResult.text, /aborted before spawn/)
 
   await postIpc({ id: 'editor-reinit', type: 'notification', method: 'initialized', payload: {} })
   const queued = await http('/pen-host/pending', { query })
@@ -308,7 +377,7 @@ try {
   resumeResolve()
   const state = await http('/pen-host/state', { query })
   assert.equal(state.json().connected, true)
-  assert.equal(subprocessSpawns, 0)
+  assert.ok(headlessSpawns > 0, 'screenshots must run on the headless engine')
   assert.equal(savedImages, 1)
   assert.equal(canvasMutations, 3)
   assert.equal(liveFile, path.join(workspace, 'one.pen'))

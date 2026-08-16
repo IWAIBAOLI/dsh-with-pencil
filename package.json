@@ -25,6 +25,7 @@
   },
   "files": [
     "lib",
+    "docs",
     "cordis.patch.yml",
     "README.md",
     "LICENSE",
@@ -57,7 +58,8 @@
     }
   },
   "dependencies": {
-    "@pen.dev/cli": "0.3.0"
+    "@pen.dev/cli": "0.3.0",
+    "schemastery": "^3.18.0"
   },
   "peerDependencies": {
     "@deepseek-ai/dsh-client-locale": "^0.1.0-rc.6",

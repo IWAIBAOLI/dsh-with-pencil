@@ -34,6 +34,6 @@ dryRun('.', [
   'LICENSE',
   'THIRD_PARTY_NOTICES.md',
   'CHANGELOG.md',
-], /^(package\.json|cordis\.patch\.yml|README\.md|LICENSE|THIRD_PARTY_NOTICES\.md|CHANGELOG\.md|lib\/[a-z0-9-]+\.js)$/)
+], /^(package\.json|cordis\.patch\.yml|README\.md|LICENSE|THIRD_PARTY_NOTICES\.md|CHANGELOG\.md|lib\/[a-z0-9-]+\.js|docs\/[A-Za-z0-9_-]+\.md)$/)
 
 console.log('npm package contents: ok')
