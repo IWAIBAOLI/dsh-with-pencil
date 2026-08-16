@@ -4,6 +4,29 @@ All notable changes to this project are documented here. Versions follow
 [Semantic Versioning](https://semver.org/); prereleases are published under the
 `beta` npm dist-tag.
 
+## 0.5.0-beta.6 - 2026-08-16
+
+- Surface the `visionMode` setting as a real card in Settings → Plugins →
+  dsh-with-pencil (radio options instead of a dropdown). The Harness settings
+  seam only exposes allowlisted namespaces, so the card is served through the
+  llm configurable-provider directory; the Models-page entry is annotated as
+  an official-limitation placeholder until the harness opens third-party
+  settings self-registration.
+- Switch screenshots to webview-first exports with shared session-file state:
+  live canvases now own edits/state/exports, headless CLI remains the fallback,
+  and every open entry (agent, canvas UI, Save As) records the session's
+  current file.
+- Expose `pencil_mcp_batch_get` as the authoritative node/text read path, and
+  describe it as such in the preset prompt.
+- Fix screenshot resolution regressions: internal high-res export temp dirs
+  moved inside the session workspace (the webview export path rejects
+  out-of-workspace output dirs, which silently fell back to the 400px native
+  thumbnail in every vision mode), and document screenshots now use the
+  webview's whole-document export directly instead of the `export_nodes` tool.
+- Retry exports on the same path 3 times (webview while a canvas is active,
+  CLI otherwise) and report failures clearly instead of leaving the agent to
+  retry blindly.
+
 ## 0.5.0-beta.5 - 2026-08-15
 
 - Align the `pencil_mcp_execute` tool description with the headless engine's
