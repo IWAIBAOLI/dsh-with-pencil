@@ -1,5 +1,7 @@
 # dsh-with-pencil
 
+[![Awesome DSH Plugin](https://beancookie.github.io/awesome-dsh-plugin/badge.svg)](https://beancookie.github.io/awesome-dsh-plugin)
+
 [English](#english) · [简体中文](#简体中文)
 
 ## English
