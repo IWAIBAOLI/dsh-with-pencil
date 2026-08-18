@@ -4,6 +4,13 @@ All notable changes to this project are documented here. Versions follow
 [Semantic Versioning](https://semver.org/); prereleases are published under the
 `beta` npm dist-tag.
 
+## 0.5.1 - 2026-08-18
+
+- Fix plugin activation on Harness 0.1.0-rc.7, which keys the
+  `settings.plugin.item` card slot by settings namespace: the card now
+  registers with `key: 'pencil'` (its settings namespace), matching the new
+  keyed slot contract while keeping `id` for older list-based hosts.
+
 ## 0.5.0 - 2026-08-18
 
 - First stable release. Webview-first exports with shared session-file state:
