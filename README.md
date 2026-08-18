@@ -115,12 +115,12 @@ effect immediately after saving. First installs default to `text`.
 
 For implementation details see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
-### Install the beta
+### Install
 
 With a working DeepSeek Harness Web profile, install the npm bundle:
 
 ```bash
-npx @deepseek-ai/dsh plugin --profile web add dsh-with-pencil@beta
+npx @deepseek-ai/dsh plugin --profile web add dsh-with-pencil
 ```
 
 Restart DSH Web after installation (`Ctrl-C` the running process first):
@@ -293,12 +293,12 @@ not. See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 
 实现细节见 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)。
 
-### 安装 beta
+### 安装
 
 在已有可用 DeepSeek Harness Web profile 的前提下，安装 npm Bundle：
 
 ```bash
-npx @deepseek-ai/dsh plugin --profile web add dsh-with-pencil@beta
+npx @deepseek-ai/dsh plugin --profile web add dsh-with-pencil
 ```
 
 安装完成后重启 DSH Web（先用 `Ctrl-C` 停止正在运行的进程）：
