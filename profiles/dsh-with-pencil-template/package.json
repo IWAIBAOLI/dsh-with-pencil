@@ -1,6 +1,6 @@
 {
   "name": "dsh-with-pencil-profile",
-  "version": "0.5.0-beta.6",
+  "version": "0.5.0",
   "private": true,
   "description": "Development DSH Web profile with Pencil. Its repository-relative file dependency requires this source tree.",
   "dependencies": {

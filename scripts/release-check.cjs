@@ -13,7 +13,7 @@ const fail = (message) => errors.push(message)
 
 if (pkg.private === true) fail('package.json still has "private": true')
 if (!/^(@[a-z0-9._-]+\/)?[a-z0-9._-]+$/.test(pkg.name || '')) fail('package name is missing or invalid')
-if (!/-[0-9A-Za-z.-]+$/.test(pkg.version || '')) warnings.push('version is not a prerelease; first public release should remain beta')
+if (!/-[0-9A-Za-z.-]+$/.test(pkg.version || '')) warnings.push('version is not a prerelease; confirm the CHANGELOG documents the stable release')
 
 const repository = typeof pkg.repository === 'string' ? pkg.repository : pkg.repository?.url
 if (!repository || /<|>|example|placeholder/i.test(repository)) fail('repository URL is missing or still a placeholder')

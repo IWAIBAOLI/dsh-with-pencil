@@ -4,6 +4,19 @@ All notable changes to this project are documented here. Versions follow
 [Semantic Versioning](https://semver.org/); prereleases are published under the
 `beta` npm dist-tag.
 
+## 0.5.0 - 2026-08-18
+
+- First stable release. Webview-first exports with shared session-file state:
+  live-canvas edits/state/exports, headless CLI as fallback.
+- Settings → Plugins → dsh-with-pencil card for the vision mode
+  (text / multimodal), exposed through the llm configurable-provider
+  directory (Harness settings-seam limitation; the Models-page entry is an
+  annotated placeholder until the harness opens third-party settings).
+- pencil_mcp_batch_get as the authoritative node/text read path.
+- Screenshot fixes: workspace-scoped temp exports, whole-document screenshots
+  via the webview global export (not the export_nodes tool), and 3x
+  same-path export retries.
+
 ## 0.5.0-beta.6 - 2026-08-16
 
 - Surface the `visionMode` setting as a real card in Settings → Plugins →
