@@ -4,7 +4,7 @@ All notable changes to this project are documented here. Versions follow
 [Semantic Versioning](https://semver.org/); prereleases are published under the
 `beta` npm dist-tag.
 
-## unreleased
+## 0.5.2 - 2026-08-20
 
 - Add `pencil_mcp_insert_image`: place an image onto the `.pen` canvas using
   pen.dev's official image-fill. It writes the image into `images/` next to the
