@@ -12,6 +12,8 @@ const checks = [
   'tests/host-components.test.mjs',
   'tests/workspace-path.test.mjs',
   'tests/workspace-resources.test.mjs',
+  'tests/session-images.test.mjs',
+  'tests/image-assets.test.mjs',
   'tests/live-canvas.test.mjs',
 ]
 

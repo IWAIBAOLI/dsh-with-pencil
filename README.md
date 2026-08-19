@@ -30,15 +30,17 @@ with DSH. It is independent and is not endorsed by pen.dev or DeepSeek.
 - A responsive 42% split view with pointer-safe resizing and an optional
   floating layout.
 
-The plugin registers seven core model tools:
+The plugin registers nine core model tools:
 
 - `pencil_mcp_open`
 - `pencil_mcp_get_app_state`
+- `pencil_mcp_batch_get`
 - `pencil_mcp_get_guidelines`
 - `pencil_mcp_execute`
 - `pencil_mcp_get_screenshot`
 - `pencil_mcp_export_html`
 - `pencil_mcp_export_nodes`
+- `pencil_mcp_insert_image`
 
 ### Create a Pencil Agent preset
 
@@ -51,8 +53,9 @@ Send this prompt once in a normal Harness conversation:
 > Assign these Pencil design tools to the preset, and no other design tools:
 > `pencil_mcp_open`, `pencil_mcp_get_app_state`,
 > `pencil_mcp_get_guidelines`, `pencil_mcp_execute`,
-> `pencil_mcp_get_screenshot`, `pencil_mcp_export_html`, and
-> `pencil_mcp_export_nodes`. Also bind one available vision tool and put its
+> `pencil_mcp_get_screenshot`, `pencil_mcp_export_html`,
+> `pencil_mcp_export_nodes`, and `pencil_mcp_insert_image`. Also bind one
+> available vision tool and put its
 > exact name in the persona; if none is available, ask the user.
 >
 > The persona must tell the Agent to complete `.pen` design tasks directly using
@@ -98,6 +101,13 @@ when compatibility requires `status`, `login`, `workspaces`, `design`, and
   hint to open the canvas.
 - `pencil_mcp_export_html` — export nodes to HTML.
 - `pencil_mcp_export_nodes` — export nodes to image files (deliverables).
+- `pencil_mcp_insert_image` — place an image onto the canvas using pen.dev's
+  official image-fill: writes the image into `images/` next to the `.pen` and
+  inserts a `frame` whose `fill` is `{type:"image", url, mode}`. Accepts a chat
+  image attachment id (from an image uploaded in this conversation) or a local
+  image file path; optional `parentId` / `width` / `height` / `x` / `y` / `mode`
+  (fit|fill|stretch). Width/height default to 400×300 when omitted (the engine
+  cannot auto-size an image-fill node).
 
 ### Configuration
 
@@ -224,15 +234,17 @@ not. See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
   生成图片、设计库、外部修改重载和冲突处理。
 - 默认 42% 的响应式右侧分屏，拖动过程中保持指针控制，也可切成浮动窗口。
 
-插件默认注册 7 个核心模型工具：
+插件默认注册 9 个核心模型工具：
 
 - `pencil_mcp_open`
 - `pencil_mcp_get_app_state`
+- `pencil_mcp_batch_get`
 - `pencil_mcp_get_guidelines`
 - `pencil_mcp_execute`
 - `pencil_mcp_get_screenshot`
 - `pencil_mcp_export_html`
 - `pencil_mcp_export_nodes`
+- `pencil_mcp_insert_image`
 
 ### 创建 Pencil Agent Preset
 
@@ -244,7 +256,8 @@ not. See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 > 为该 Preset 指定以下 Pencil 设计工具：`pencil_mcp_open`、
 > `pencil_mcp_get_app_state`、`pencil_mcp_get_guidelines`、
 > `pencil_mcp_execute`、`pencil_mcp_get_screenshot`、
-> `pencil_mcp_export_html`、`pencil_mcp_export_nodes`，不再指定其他设计工具。
+> `pencil_mcp_export_html`、`pencil_mcp_export_nodes`、
+> `pencil_mcp_insert_image`，不再指定其他设计工具。
 > 同时绑定一个可用的视觉工具，并把准确工具名写入 Persona；没有视觉工具则询问用户。
 >
 > Persona 应要求 Agent 直接完成 `.pen` 设计任务，只使用该 Preset 指定的设计工具和视觉
@@ -278,6 +291,10 @@ not. See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
   走高清渲染；画布未打开时返回压缩截图并提示打开画布。
 - `pencil_mcp_export_html` — 导出节点为 HTML。
 - `pencil_mcp_export_nodes` — 导出节点为图片文件（交付物）。
+- `pencil_mcp_insert_image` — 用 pen.dev 官方 image-fill 把图片放进画布：把图片写入
+  `.pen` 旁的 `images/` 并插入一个 `fill:{type:"image",url,mode}` 的 frame。接受
+  聊天图片附件 id 或本地图片路径；可选 `parentId`/`width`/`height`/`x`/`y`/`mode`
+  （fit|fill|stretch）。未指定尺寸时默认 400×300（引擎无法对 image-fill 节点自动算尺寸）。
 
 ### 配置
 

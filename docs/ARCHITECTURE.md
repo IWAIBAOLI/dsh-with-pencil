@@ -145,6 +145,8 @@ lib/ipc-binary.js            Lossless binary values over JSON browser IPC
 lib/session-store.js         Browser/CLI login reuse and secure persistence
 lib/workspace-resources.js   Imports, generated images, watchers, libraries
 lib/workspace-path.js        Session workspace and path boundaries
+lib/session-images.js        Chat-image attachment registry (agent/pre-step capture)
+lib/image-assets.js          Image sniff + placement into images/ next to the .pen
 lib/legacy-tools.js          Optional one-shot CLI helpers
 lib/client.js                Harness split/floating canvas UI
 cordis.patch.yml             DSH Bundle and Host service injection

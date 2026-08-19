@@ -4,6 +4,18 @@ All notable changes to this project are documented here. Versions follow
 [Semantic Versioning](https://semver.org/); prereleases are published under the
 `beta` npm dist-tag.
 
+## unreleased
+
+- Add `pencil_mcp_insert_image`: place an image onto the `.pen` canvas using
+  pen.dev's official image-fill. It writes the image into `images/` next to the
+  `.pen` and inserts a `frame` with `fill: {type:"image", url, mode}`. Sources
+  an image either from a chat attachment id (tracked from the conversation's
+  durable image blocks) or a local file path. Optional `parentId` / `width` /
+  `height` / `x` / `y` / `mode`.
+- Internally track chat image attachments (`session-images`) so the tool can
+  resolve "that image from the chat" by attachment id; the capture only records
+  refs and never rewrites or strips content.
+
 ## 0.5.1 - 2026-08-18
 
 - Fix plugin activation on Harness 0.1.0-rc.7, which keys the
