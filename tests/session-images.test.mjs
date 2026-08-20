@@ -32,4 +32,12 @@ assert.equal(images.lookup(session2, 'img-2').id, 'img-2')
 images.clear(session)
 assert.equal(images.lookup(session, 'img-1'), undefined)
 
+// The id-keyed fallback is bounded and evicts the least-recently-used session.
+for (let index = 0; index <= 256; index++) {
+  const boundedSession = { id: 'bounded-' + index }
+  images.record(boundedSession, [{ content: [{ type: 'image', attachment: { attachmentId: 'bounded-image-' + index } }] }])
+}
+assert.equal(images.lookup({ id: 'bounded-0' }, 'bounded-image-0'), undefined)
+assert.equal(images.lookup({ id: 'bounded-256' }, 'bounded-image-256').attachmentId, 'bounded-image-256')
+
 console.log('session-images: ok')
