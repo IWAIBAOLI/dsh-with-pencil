@@ -21,7 +21,14 @@ const images = createSessionImages()
 const session = { id: 'sess-1' }
 images.record(session, [{ content: [{ type: 'image', attachment: { attachmentId: 'img-1', mediaType: 'image/png' } }] }])
 assert.equal(images.lookup(session, 'img-1').attachmentId, 'img-1')
+assert.equal(images.lookup(session, 'latest').attachmentId, 'img-1')
+assert.equal(images.lookup(session, 'recent:1').attachmentId, 'img-1')
 assert.equal(images.lookup(session, 'missing'), undefined)
+images.record(session, [{ content: [{ type: 'image', attachment: { attachmentId: 'img-new', mediaType: 'image/webp' } }] }])
+assert.equal(images.lookup(session, 'latest').attachmentId, 'img-new')
+assert.equal(images.lookup(session, 'recent:2').attachmentId, 'img-1')
+assert.equal(images.lookup(session, 'recent:0'), undefined)
+assert.equal(images.lookup(session, 'recent:3'), undefined)
 // a different session must not see it
 assert.equal(images.lookup({ id: 'sess-2' }, 'img-1'), undefined)
 // record via `id` alias too

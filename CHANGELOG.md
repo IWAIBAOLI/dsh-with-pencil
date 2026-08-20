@@ -4,6 +4,15 @@ All notable changes to this project are documented here. Versions follow
 [Semantic Versioning](https://semver.org/); prereleases are published under the
 `beta` npm dist-tag.
 
+## Unreleased
+
+- Let `pencil_mcp_insert_image` resolve `latest` and `recent:N` conversation
+  image aliases so native multimodal and transcription-backed text models do
+  not need to know Harness's opaque attachment ids.
+- Capture raw pre-step ImageBlocks before downstream vision wrappers rewrite
+  them, supplement the registry with downstream results, and clear it on the
+  official `session/disposed` lifecycle event.
+
 ## 0.5.2 - 2026-08-20
 
 - Add `pencil_mcp_insert_image`: place an image onto the `.pen` canvas using

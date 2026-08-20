@@ -455,10 +455,11 @@ try {
   }]
   await eventHandlers.get('agent/pre-step')(
     { agent: baseExec.agent, messages: chatMessages },
-    async () => ({ messages: chatMessages }),
+    // Simulate a text-model vision wrapper replacing the raw ImageBlock.
+    async () => ({ kind: 'enter', messages: [{ role: 'user', content: [{ type: 'text', text: '[图片转译]' }] }] }),
   )
   const insertedImage = await call('pencil_mcp_insert_image', {
-    image: 'chat-image-1', filePath: 'variants/final.lib.pen', name: 'Chat reference',
+    image: 'latest', filePath: 'variants/final.lib.pen', name: 'Chat reference',
     width: 640, height: 360, x: 24, y: 48, mode: 'fill',
   })
   assert.equal(readImages, 1)
@@ -476,7 +477,7 @@ try {
   const imagesBeforeFailedInsert = fs.readdirSync(imagesDir).sort()
   failNextBatch = true
   const failedInsert = await tools.get('pencil_mcp_insert_image').execute({
-    image: 'chat-image-1', filePath: 'variants/final.lib.pen', name: 'Must roll back',
+    image: 'recent:1', filePath: 'variants/final.lib.pen', name: 'Must roll back',
   }, baseExec)
   assert.equal(failedInsert.ok, false)
   assert.match(failedInsert.text, /simulated insert failure/)
@@ -490,13 +491,20 @@ try {
   const imagesBeforeSaveFailure = fs.readdirSync(imagesDir).sort()
   invalidNextSave = true
   const saveFailedInsert = await tools.get('pencil_mcp_insert_image').execute({
-    image: 'chat-image-1', filePath: 'variants/final.lib.pen', name: 'Retained after save failure',
+    image: 'latest', filePath: 'variants/final.lib.pen', name: 'Retained after save failure',
   }, baseExec)
   assert.equal(saveFailedInsert.ok, false)
   assert.match(saveFailedInsert.text, /edit succeeded, but disk save failed/i)
   assert.equal(fs.readdirSync(imagesDir).length, imagesBeforeSaveFailure.length + 1)
   const recoveredImageSave = await http('/pen-host/save', { method: 'POST', query })
   assert.equal(recoveredImageSave.status, 200, recoveredImageSave.text)
+
+  eventHandlers.get('session/disposed')(baseExec.agent.session)
+  const clearedImage = await tools.get('pencil_mcp_insert_image').execute({
+    image: 'latest', filePath: 'variants/final.lib.pen',
+  }, baseExec)
+  assert.equal(clearedImage.ok, false)
+  assert.match(clearedImage.text, /no conversation image matches "latest"/)
 
   running = false
   const unbound = await http('/pen-host/unbind', { method: 'POST', query })

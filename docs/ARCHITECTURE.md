@@ -102,9 +102,10 @@ without a restart.
   instruction, official spot-check semantics.
 
 Note: the plugin does **not** provide an image-transcription module. In `text`
-mode, transcription depends on the deployment's vision plugin (e.g.
-`dsh-vision-proxy` / a vision router); without one, images reach the model only
-as markers.
+mode, transcription depends on an image-capable wrapper route (e.g.
+`dsh-vision-proxy` or the wrapper/stealth route from `dsh-vision-router`). A
+direct text-only Harness route rejects chat images before the plugin's
+`agent/pre-step` seam and cannot consume image tool results.
 
 ## Headless DSL subset
 
@@ -145,7 +146,7 @@ lib/ipc-binary.js            Lossless binary values over JSON browser IPC
 lib/session-store.js         Browser/CLI login reuse and secure persistence
 lib/workspace-resources.js   Imports, generated images, watchers, libraries
 lib/workspace-path.js        Session workspace and path boundaries
-lib/session-images.js        Chat-image attachment registry (agent/pre-step capture)
+lib/session-images.js        Raw/downstream chat-image registry + latest/recent aliases
 lib/image-assets.js          Image sniff + placement into images/ next to the .pen
 lib/legacy-tools.js          Optional one-shot CLI helpers
 lib/client.js                Harness split/floating canvas UI
