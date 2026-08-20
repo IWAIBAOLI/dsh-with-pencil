@@ -6,6 +6,10 @@ All notable changes to this project are documented here. Versions follow
 
 ## Unreleased
 
+- Add a fixed local-development pipeline (`npm run dev:install`) that tests,
+  packs a uniquely content-hashed tarball, installs it into a DSH profile, and
+  verifies the installed snapshot. This avoids stale same-version `file:`
+  caches and duplicate native libraries from source links.
 - Keep `batch_get`, node screenshots, and whole-document screenshot geometry on
   the active webview scene, preventing read-after-write failures caused by a
   second stale/empty headless scene. Live node screenshots use `export-nodes`;

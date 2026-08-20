@@ -52,11 +52,13 @@ Send this prompt once in a normal Harness conversation:
 >
 > Assign these Pencil design tools to the preset, and no other design tools:
 > `pencil_mcp_open`, `pencil_mcp_get_app_state`,
-> `pencil_mcp_get_guidelines`, `pencil_mcp_execute`,
+> `pencil_mcp_batch_get`, `pencil_mcp_get_guidelines`, `pencil_mcp_execute`,
 > `pencil_mcp_get_screenshot`, `pencil_mcp_export_html`,
-> `pencil_mcp_export_nodes`, and `pencil_mcp_insert_image`. Also bind one
-> available vision tool and put its
-> exact name in the persona; if none is available, ask the user.
+> `pencil_mcp_export_nodes`, and `pencil_mcp_insert_image`. For a text-only
+> model, also bind one available vision tool and put its exact name in the
+> persona; if none is available, ask the user. A native multimodal model can
+> consume the screenshot attachment directly and does not require that extra
+> vision tool.
 >
 > The persona must tell the Agent to complete `.pen` design tasks directly using
 > only the design and vision tools assigned to this preset. Before calling a
@@ -123,7 +125,9 @@ when compatibility requires `status`, `login`, `workspaces`, `design`, and
   stealth route from `dsh-vision-router`). A direct text-only Harness route
   rejects chat image uploads before this plugin runs and cannot consume image
   tool results.
-- `multimodal` — native screenshots; the model sees the pixels itself.
+- `multimodal` — the model receives screenshot attachments and sees the pixels
+  itself. An active canvas uses its live exports; without one, screenshots use
+  the native headless renderer.
 
 The setting card lives in **Settings → Plugins → dsh-with-pencil** and takes
 effect immediately after saving. First installs default to `text`.
@@ -158,13 +162,19 @@ of time and point `DSH_PEN_EDITOR_DIR` to its `out` directory.
 For local development from this checkout:
 
 ```bash
-npx @deepseek-ai/dsh plugin --profile web add file:/absolute/path/to/dsh-with-pencil
+npm run dev:install -- --profile web
+npx @deepseek-ai/dsh web
 ```
 
-Use `file:` rather than `link:` so the target profile receives a complete
-dependency tree. When migrating from an older development build, remove
-`pen-dev-bridge-bundle` and `pen-dev-bridge` first so the same canvas routes are
-not registered twice.
+`dev:install` runs the complete test suite, packs the exact publishable files
+into `.dev-builds/` with a content hash in the tarball name, installs that
+unique snapshot, and verifies the installed files. This avoids pnpm reusing an
+old same-version `file:` snapshot and avoids the duplicate native libraries a
+source `link:` can load. Stop the running DSH process before installation and
+restart it afterward. Use `npm run dev:pack` only when an install is not needed.
+
+When migrating from an older development build, remove `pen-dev-bridge-bundle`
+and `pen-dev-bridge` first so the same canvas routes are not registered twice.
 
 The development-only profile fixture is available at
 `profiles/dsh-with-pencil-template/`.
@@ -259,11 +269,12 @@ not. See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 > 基于标准编码 Preset，保留官方固定工具。
 >
 > 为该 Preset 指定以下 Pencil 设计工具：`pencil_mcp_open`、
-> `pencil_mcp_get_app_state`、`pencil_mcp_get_guidelines`、
+> `pencil_mcp_get_app_state`、`pencil_mcp_batch_get`、`pencil_mcp_get_guidelines`、
 > `pencil_mcp_execute`、`pencil_mcp_get_screenshot`、
 > `pencil_mcp_export_html`、`pencil_mcp_export_nodes`、
 > `pencil_mcp_insert_image`，不再指定其他设计工具。
-> 同时绑定一个可用的视觉工具，并把准确工具名写入 Persona；没有视觉工具则询问用户。
+> 如果使用纯文本模型，同时绑定一个可用的视觉工具，并把准确工具名写入 Persona；没有
+> 视觉工具则询问用户。原生多模态模型可直接消费截图附件，无需额外绑定视觉工具。
 >
 > Persona 应要求 Agent 直接完成 `.pen` 设计任务，只使用该 Preset 指定的设计工具和视觉
 > 工具。调用前查看 Agent 可用工具列表中这些工具自带的说明和参数定义；这些说明即完整
@@ -312,7 +323,8 @@ not. See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
   **本插件不提供图片转译模块**：转译依赖声明图片能力的包装路由（如
   `dsh-vision-proxy` 或 `dsh-vision-router` 的 wrapper/stealth 路由）。Harness 的直连
   纯文本路由会在本插件运行前拒绝聊天图片，也无法消费工具返回的图片结果。
-- `multimodal` — 使用原生截图，模型自己看像素。
+- `multimodal` — 模型直接接收截图附件并自己看像素；画布活动时使用实时画布导出，
+  没有活动画布时使用原生 headless 截图。
 
 配置卡片位于 **设置 → 插件 → dsh-with-pencil**，保存后立即生效；首次安装默认
 `text`。
@@ -345,11 +357,15 @@ npm 包本身不复制或再分发 browser editor。离线环境可以预先下�
 从本仓库进行本地开发安装：
 
 ```bash
-npx @deepseek-ai/dsh plugin --profile web add file:/absolute/path/to/dsh-with-pencil
+npm run dev:install -- --profile web
+npx @deepseek-ai/dsh web
 ```
 
-这里使用 `file:` 而不是 `link:`，让目标 profile 得到完整依赖树。从旧开发版迁移时，先移除
-`pen-dev-bridge-bundle` 和 `pen-dev-bridge`，避免相同画布路由被注册两次。
+`dev:install` 会先运行完整测试，再把实际可发布文件打成文件名带内容哈希的唯一 tarball，
+安装该快照并核对安装文件。这样既不会命中 pnpm 的同版本 `file:` 旧快照，也不会像源码
+`link:` 一样加载重复的原生库。安装前先停止 DSH，安装后重新启动。只需要构建、不安装时
+使用 `npm run dev:pack`。从旧开发版迁移时，先移除 `pen-dev-bridge-bundle` 和
+`pen-dev-bridge`，避免相同画布路由被注册两次。
 
 开发用 profile 模板位于 `profiles/dsh-with-pencil-template/`。
 

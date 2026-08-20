@@ -137,6 +137,31 @@ const ctx = {
 const bridge = (await import(bridgeUrl.href + '?test=' + Date.now())).default
 bridge.apply(ctx)
 
+const expectedTools = [
+  'pencil_mcp_open',
+  'pencil_mcp_get_app_state',
+  'pencil_mcp_batch_get',
+  'pencil_mcp_get_guidelines',
+  'pencil_mcp_execute',
+  'pencil_mcp_get_screenshot',
+  'pencil_mcp_export_html',
+  'pencil_mcp_export_nodes',
+  'pencil_mcp_insert_image',
+]
+assert.deepEqual([...tools.keys()].filter((name) => name.startsWith('pencil_mcp_')), expectedTools)
+for (const name of expectedTools) {
+  const tool = tools.get(name)
+  assert.ok(tool.description && tool.description.length >= 40, name + ' must have a substantive description')
+  assert.ok(tool.parameters && typeof tool.parameters === 'object', name + ' must expose parameter definitions')
+  if (tool.parameters.filePath) {
+    assert.match(tool.parameters.filePath.description, /exact session workspace \(cwd\)/, name + ' must define filePath relative to the exact cwd')
+  }
+}
+assert.match(tools.get('pencil_mcp_get_screenshot').description, /visual-fidelity spot check/)
+assert.match(tools.get('pencil_mcp_insert_image').description, /latest/)
+assert.match(tools.get('pencil_mcp_insert_image').description, /recent:N/)
+assert.match(tools.get('pencil_mcp_insert_image').description, /text-only model/)
+
 async function http(pathname, options = {}) {
   const exact = routes.get('exact:' + pathname)
   const prefix = [...routes.entries()].find(([key]) => key.startsWith('prefix:') && pathname.startsWith(key.slice(7)))?.[1]
