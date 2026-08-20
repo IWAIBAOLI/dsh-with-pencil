@@ -6,6 +6,10 @@ All notable changes to this project are documented here. Versions follow
 
 ## Unreleased
 
+- Add a fixed local-development pipeline (`npm run dev:install`) that tests,
+  packs a uniquely content-hashed tarball, installs it into a DSH profile, and
+  verifies the installed snapshot. This avoids stale same-version `file:`
+  caches and duplicate native libraries from source links.
 - Support Harness conversation image aliases (`latest` and `recent:N`) in
   `pencil_mcp_insert_image`, while preserving exact attachment-id and local-file
   inputs.

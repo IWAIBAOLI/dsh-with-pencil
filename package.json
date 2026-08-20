@@ -69,6 +69,8 @@
     "react": "^18.2.0"
   },
   "scripts": {
+    "dev:install": "node scripts/dev-install.cjs",
+    "dev:pack": "node scripts/dev-install.cjs --pack-only --skip-tests",
     "pack:check": "node scripts/pack-check.cjs",
     "prepublishOnly": "node scripts/prepublish-guard.cjs && npm run release:check",
     "release:check": "npm test && node scripts/release-check.cjs",

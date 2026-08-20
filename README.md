@@ -161,13 +161,19 @@ of time and point `DSH_PEN_EDITOR_DIR` to its `out` directory.
 For local development from this checkout:
 
 ```bash
-npx @deepseek-ai/dsh plugin --profile web add file:/absolute/path/to/dsh-with-pencil
+npm run dev:install -- --profile web
+npx @deepseek-ai/dsh web
 ```
 
-Use `file:` rather than `link:` so the target profile receives a complete
-dependency tree. When migrating from an older development build, remove
-`pen-dev-bridge-bundle` and `pen-dev-bridge` first so the same canvas routes are
-not registered twice.
+`dev:install` runs the complete test suite, packs the exact publishable files
+into `.dev-builds/` with a content hash in the tarball name, installs that
+unique snapshot, and verifies the installed files. This avoids pnpm reusing an
+old same-version `file:` snapshot and avoids the duplicate native libraries a
+source `link:` can load. Stop the running DSH process before installation and
+restart it afterward. Use `npm run dev:pack` only when an install is not needed.
+
+When migrating from an older development build, remove `pen-dev-bridge-bundle`
+and `pen-dev-bridge` first so the same canvas routes are not registered twice.
 
 The development-only profile fixture is available at
 `profiles/dsh-with-pencil-template/`.
@@ -350,11 +356,15 @@ npm 包本身不复制或再分发 browser editor。离线环境可以预先下�
 从本仓库进行本地开发安装：
 
 ```bash
-npx @deepseek-ai/dsh plugin --profile web add file:/absolute/path/to/dsh-with-pencil
+npm run dev:install -- --profile web
+npx @deepseek-ai/dsh web
 ```
 
-这里使用 `file:` 而不是 `link:`，让目标 profile 得到完整依赖树。从旧开发版迁移时，先移除
-`pen-dev-bridge-bundle` 和 `pen-dev-bridge`，避免相同画布路由被注册两次。
+`dev:install` 会先运行完整测试，再把实际可发布文件打成文件名带内容哈希的唯一 tarball，
+安装该快照并核对安装文件。这样既不会命中 pnpm 的同版本 `file:` 旧快照，也不会像源码
+`link:` 一样加载重复的原生库。安装前先停止 DSH，安装后重新启动。只需要构建、不安装时
+使用 `npm run dev:pack`。从旧开发版迁移时，先移除 `pen-dev-bridge-bundle` 和
+`pen-dev-bridge`，避免相同画布路由被注册两次。
 
 开发用 profile 模板位于 `profiles/dsh-with-pencil-template/`。
 
