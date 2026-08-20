@@ -107,6 +107,13 @@ mode, transcription depends on an image-capable wrapper route (e.g.
 direct text-only Harness route rejects chat images before the plugin's
 `agent/pre-step` seam and cannot consume image tool results.
 
+The session-image registry observes raw prompt messages before downstream
+vision wrappers run, then observes the downstream decision as well. Therefore
+`pencil_mcp_insert_image(image="latest" | "recent:N")` resolves the original
+durable attachment even when a wrapper replaces the model-facing image block
+with OCR or descriptive text. This preserves pixels for canvas insertion; it
+does not make a direct text-only route image-capable.
+
 ## Headless DSL subset
 
 The headless snippet API is a strict subset of the official DSL: only

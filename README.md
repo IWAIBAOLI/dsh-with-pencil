@@ -107,7 +107,9 @@ when compatibility requires `status`, `login`, `workspaces`, `design`, and
   image as `latest`, `recent:N` (`recent:1` = latest), an exact attachment id,
   or a local image file path; optional `parentId` / `width` / `height` / `x` /
   `y` / `mode` (fit|fill|stretch). Width/height default to 400×300 when omitted
-  (the engine cannot auto-size an image-fill node).
+  (the engine cannot auto-size an image-fill node). On a text model behind an
+  image-capable wrapper, the aliases still select the original conversation
+  attachment captured before the wrapper rewrites it to OCR/description text.
 
 ### Configuration
 
@@ -297,7 +299,8 @@ not. See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
   `.pen` 旁的 `images/` 并插入一个 `fill:{type:"image",url,mode}` 的 frame。接受
   `latest`、`recent:N`（`recent:1` 即最新图片）、准确附件 id 或本地图片路径；可选
   `parentId`/`width`/`height`/`x`/`y`/`mode`（fit|fill|stretch）。未指定尺寸时默认
-  400×300（引擎无法对 image-fill 节点自动算尺寸）。
+  400×300（引擎无法对 image-fill 节点自动算尺寸）。文本模型通过图片包装路由运行时，
+  即使包装层把图片改写成 OCR／描述文本，这些别名仍指向改写前捕获的会话原图附件。
 
 ### 配置
 
