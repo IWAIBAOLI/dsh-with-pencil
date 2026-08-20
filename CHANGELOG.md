@@ -6,6 +6,8 @@ All notable changes to this project are documented here. Versions follow
 
 ## Unreleased
 
+## 0.5.3 - 2026-08-20
+
 - Add a fixed local-development pipeline (`npm run dev:install`) that tests,
   packs a uniquely content-hashed tarball, installs it into a DSH profile, and
   verifies the installed snapshot. This avoids stale same-version `file:`
