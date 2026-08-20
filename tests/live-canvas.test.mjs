@@ -33,9 +33,7 @@ const sessions = new Map([['canvas-agent', { header: { cwd: workspace } }]])
 let savedImages = 0
 let readImages = 0
 let headlessSpawns = 0
-// Screenshots now run on the shared headless engine (the webview screenshot
-// is a viewport image that ignores nodeId), so `subprocess.spawn` must answer
-// with a working CLI/MCP pair instead of refusing to start.
+const validPng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64')
 const headlessDocs = new Map()
 function headlessHandle(spec) {
   headlessSpawns += 1
@@ -226,7 +224,13 @@ async function fakeEditor() {
       } else if (message.method === 'batch-get') {
         await postIpc({
           id: message.id, type: 'response', method: message.method,
-          payload: { success: true, result: { nodes: liveDocument.children.map((node) => ({ ...node })) } },
+          payload: { success: true, result: { nodes: liveDocument.children.map((node, index) => ({
+            ...node,
+            x: Number.isFinite(Number(node.x)) ? Number(node.x) : index * 120,
+            y: Number.isFinite(Number(node.y)) ? Number(node.y) : 0,
+            width: Number(node.width) || 100,
+            height: Number(node.height) || 80,
+          })) } },
         })
       } else if (message.method === 'batch-design') {
         const input = message.payload.input || ''
@@ -251,7 +255,7 @@ async function fakeEditor() {
       } else if (message.method === 'export-nodes') {
         exportNodeCalls += 1
         const format = message.payload.format || 'png'
-        const bytes = Buffer.from(format + ':' + message.payload.nodeIds.join(','))
+        const bytes = format === 'pdf' ? Buffer.from('pdf:' + message.payload.nodeIds.join(',')) : validPng
         await postIpc({
           id: message.id, type: 'response', method: message.method,
           payload: { success: true, result: { images: [{ nodeId: message.payload.nodeIds.join(','), image: bytes.toString('base64'), mimeType: format === 'pdf' ? 'application/pdf' : 'image/png' }] } },
@@ -395,16 +399,16 @@ try {
   controller.abort('test cancellation')
   const cancelledResult = await cancelled
   assert.equal(cancelledResult.ok, false)
-  assert.match(cancelledResult.text, /aborted before spawn/)
+  assert.match(cancelledResult.text, /canvas request (?:batch-get was )?cancelled before delivery/)
 
   await postIpc({ id: 'editor-reinit', type: 'notification', method: 'initialized', payload: {} })
   const queued = await http('/pen-host/pending', { query })
-  assert.equal(queued.json().messages.some((message) => message.method === 'get-screenshot'), false)
+  assert.equal(queued.json().messages.some((message) => message.method === 'batch-get' || message.method === 'export-nodes'), false)
 
   resumeResolve()
   const state = await http('/pen-host/state', { query })
   assert.equal(state.json().connected, true)
-  assert.ok(headlessSpawns > 0, 'screenshots must run on the headless engine')
+  assert.equal(headlessSpawns, 0, 'live document reads and screenshots must not start a divergent headless engine')
   assert.equal(savedImages, 1)
   assert.equal(canvasMutations, 3)
   assert.equal(liveFile, path.join(workspace, 'one.pen'))
@@ -436,7 +440,7 @@ try {
   assert.equal(exportedPng.status, 200, exportedPng.text)
   assert.equal(exportedPng.json().scope, 'selection')
   assert.equal(exportedPng.json().files.length, 2)
-  assert.equal(fs.readFileSync(path.join(workspace, exportedPng.json().files[0]), 'utf8'), 'png:' + selectedElements[0].id)
+  assert.deepEqual(fs.readFileSync(path.join(workspace, exportedPng.json().files[0])).subarray(0, 8), validPng.subarray(0, 8))
   selectedElements = []
   const exportedPdf = await http('/pen-host/export', { method: 'POST', query, body: { format: 'pdf' } })
   assert.equal(exportedPdf.status, 200, exportedPdf.text)
@@ -472,6 +476,22 @@ try {
   })
   assert.match(imageNode.fill.url, /^\.\/images\/pencil-.+\.png$/)
   assert.equal(fs.existsSync(path.join(workspace, 'variants', imageNode.fill.url)), true)
+
+  const insertedLiveNode = liveDocument.children.at(-1)
+  const headlessBeforeImageRead = headlessSpawns
+  const imageRead = await call('pencil_mcp_batch_get', {
+    filePath: 'variants/final.lib.pen', nodeIds: [insertedLiveNode.id],
+  })
+  assert.equal(JSON.parse(imageRead.text).some((node) => node.id === insertedLiveNode.id), true)
+  const imageShot = await call('pencil_mcp_get_screenshot', {
+    filePath: 'variants/final.lib.pen', nodeId: insertedLiveNode.id,
+  })
+  assert.ok(imageShot.image && imageShot.image.attachmentId)
+  const imageDocumentShot = await call('pencil_mcp_get_screenshot', {
+    filePath: 'variants/final.lib.pen', nodeId: 'document',
+  })
+  assert.ok(imageDocumentShot.image && imageDocumentShot.image.attachmentId)
+  assert.equal(headlessSpawns, headlessBeforeImageRead, 'read-after-write and screenshots must stay on the live canvas')
 
   const imagesDir = path.join(workspace, 'variants', 'images')
   const imagesBeforeFailedInsert = fs.readdirSync(imagesDir).sort()

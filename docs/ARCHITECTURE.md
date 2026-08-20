@@ -24,20 +24,23 @@ can fail to open files or overwrite them incorrectly.
 There are two independent renderers:
 
 - **Webview**: the official editor iframe inside the Harness canvas. Reliable
-  for whole-document rendering (complex gradients/shadows), used by the manual
-  export menu. Its screenshot endpoint is a *viewport* image that ignores
-  `nodeId`, so it cannot serve node screenshots.
+  for node and whole-document exports (including complex gradients/shadows),
+  used by the manual export menu and live-canvas screenshots. Its screenshot
+  endpoint is a *viewport* image that ignores `nodeId`, so node screenshots use
+  `export-nodes` instead.
 - **Headless engine** (`@pen.dev/cli` interactive): node-accurate screenshots
   (each node renders at its own aspect), but complex nodes can time out or fail
   on large-scale exports with misleading "wrong .pen file" errors.
 
 ### Tool routing (`headless-runtime.js`)
 
-`execute`, `get_app_state` and `export_nodes` prefer the webview when the
-canvas is active (`canvasBridge.has` = binding initialized and seen recently);
-otherwise they use the headless engine. `get_screenshot`, `batch_get` and
-`get_guidelines` always run headless — the webview cannot screenshot a node,
-and the data tools do not need a canvas.
+`execute`, `get_app_state`, `batch_get` and `export_nodes` prefer the webview
+when the canvas is active (`canvasBridge.has` = binding initialized and seen
+recently); otherwise they use the headless engine. Model-facing screenshots
+also stay on the active webview: one node uses `export-nodes`, while
+`document` exports every live top-level node and composes them by document
+coordinates. `get_guidelines` and screenshots without an active canvas run
+headless.
 
 A connecting canvas (binding exists but not yet initialized) is worth waiting
 for; a stale binding (hidden too long, heartbeat expired >30s) falls back to
@@ -51,8 +54,9 @@ headless so calls never stall.
   it, and tool calls operate on it (`runMcpNow` reads it first). The webview
   and the headless engine therefore never look at different files.
 - The headless engine records the file mtime at load and reloads automatically
-  when it changes (`ensureEngine`), so a live canvas save and a headless read
-  never drift apart.
+  when it changes (`ensureEngine`). While a canvas is active, document reads
+  and screenshots do not cross into headless at all, avoiding stale in-memory
+  scenes during read-after-write sequences.
 - The webview saves to disk after every successful edit
   (`save-resource` reaches disk and the JSON is parsed again).
 
@@ -86,8 +90,9 @@ without a restart.
 
 - **`text`** (DeepSeek and other non-multimodal models): image transcription
   needs clarity, so screenshots route to high-resolution rendering:
-  - Small nodes (≤640px) use the native headless screenshot.
-  - Large nodes export through the webview renderer (CLI fallback + 3 retries).
+  - With an active canvas, every node uses the webview `export-nodes` renderer.
+  - With no canvas, small nodes (≤640px) use the native headless screenshot;
+    large nodes use a CLI export with 3 retries.
   - `document` goes through the webview's global document export
     (`exporter.run`) and the exported node images are composed back into one
     document view by document coordinates (sharp); if the canvas is closed,
@@ -98,8 +103,9 @@ without a restart.
     colors/fonts/alignment instead of OCR; layers that ignore it (the current
     third-party one) simply use their default prompt — the field is additive
     and needs no capability probing.
-- **`multimodal`**: the model sees pixels itself — native screenshots, no
-  instruction, official spot-check semantics.
+- **`multimodal`**: the model sees pixels itself. An active canvas still uses
+  its live exports to keep the scene consistent; without one, screenshots are
+  native headless. No transcription instruction is attached.
 
 Note: the plugin does **not** provide an image-transcription module. In `text`
 mode, transcription depends on an image-capable wrapper route (e.g.

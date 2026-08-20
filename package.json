@@ -59,7 +59,8 @@
   },
   "dependencies": {
     "@pen.dev/cli": "0.3.0",
-    "schemastery": "^3.18.0"
+    "schemastery": "^3.18.0",
+    "sharp": "^0.34.5"
   },
   "peerDependencies": {
     "@deepseek-ai/dsh-client-locale": "^0.1.0-rc.6",

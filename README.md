@@ -87,7 +87,8 @@ when compatibility requires `status`, `login`, `workspaces`, `design`, and
 ### Model tools
 
 - `pencil_mcp_open` — open/switch the conversation's `.pen` file; call FIRST
-  for any design work.
+  for any design work. `filePath` is relative to the exact session workspace
+  (`cwd`), so do not repeat the workspace directory name.
 - `pencil_mcp_get_app_state` — current document state; `include_schema: true`
   returns the `.pen` schema.
 - `pencil_mcp_batch_get` — read node data (text content, properties) by ID or
@@ -284,7 +285,8 @@ not. See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 
 ### 模型工具
 
-- `pencil_mcp_open` — 打开/切换会话的 `.pen` 文件；任何设计任务先调用它。
+- `pencil_mcp_open` — 打开/切换会话的 `.pen` 文件；任何设计任务先调用它。`filePath`
+  相对于会话的准确工作目录（`cwd`），不要再次重复工作目录名。
 - `pencil_mcp_get_app_state` — 当前文档状态；`include_schema: true` 返回 `.pen` schema。
 - `pencil_mcp_batch_get` — 按节点 ID/模式读取节点数据（文字内容、属性）——验证文字与
   属性值的权威方式。

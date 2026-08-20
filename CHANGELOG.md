@@ -6,6 +6,12 @@ All notable changes to this project are documented here. Versions follow
 
 ## Unreleased
 
+- Keep `batch_get`, node screenshots, and whole-document screenshot geometry on
+  the active webview scene, preventing read-after-write failures caused by a
+  second stale/empty headless scene. Live node screenshots use `export-nodes`;
+  whole documents use the same live tree that was exported for composition.
+- Clarify that model-tool `.pen` paths are relative to the exact session `cwd`,
+  preventing duplicated paths such as `designs/designs/canvas.pen`.
 - Let `pencil_mcp_insert_image` resolve `latest` and `recent:N` conversation
   image aliases so native multimodal and transcription-backed text models do
   not need to know Harness's opaque attachment ids.
