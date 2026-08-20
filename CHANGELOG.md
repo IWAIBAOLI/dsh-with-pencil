@@ -4,6 +4,19 @@ All notable changes to this project are documented here. Versions follow
 [Semantic Versioning](https://semver.org/); prereleases are published under the
 `beta` npm dist-tag.
 
+## Unreleased
+
+- Support Harness conversation image aliases (`latest` and `recent:N`) in
+  `pencil_mcp_insert_image`, while preserving exact attachment-id and local-file
+  inputs.
+- Capture raw ImageBlocks before downstream vision wrappers translate them,
+  clear the session registry on disposal, validate image node inputs, and remove
+  orphaned assets when an insert is definitively rejected.
+- Clarify that Harness `read_image` reads pixels for image-capable routes while
+  `pencil_mcp_insert_image` places the original image asset on the Pencil canvas.
+- Clarify `.pen` paths as relative to the exact session workspace (`cwd`) to
+  prevent duplicated directory prefixes.
+
 ## 0.5.2 - 2026-08-20
 
 - Add `pencil_mcp_insert_image`: place an image onto the `.pen` canvas using

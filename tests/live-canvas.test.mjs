@@ -31,6 +31,7 @@ const cleanups = []
 const eventHandlers = new Map()
 const sessions = new Map([['canvas-agent', { header: { cwd: workspace } }]])
 let savedImages = 0
+let readImages = 0
 let headlessSpawns = 0
 // Screenshots now run on the shared headless engine (the webview screenshot
 // is a viewport image that ignores nodeId), so `subprocess.spawn` must answer
@@ -119,6 +120,14 @@ const ctx = {
         savedImages += 1
         return { attachmentId: 'test-image-' + savedImages, mediaType, bytes: data.byteLength, width: 1, height: 1, name: imageName }
       },
+      async readImage(ref) {
+        readImages += 1
+        assert.equal(ref.attachmentId, 'chat-image-1')
+        return {
+          data: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64'),
+          ref,
+        }
+      },
     }
     return undefined
   },
@@ -175,6 +184,8 @@ let canvasMutations = 0
 let selectedElements = []
 let exportNodeCalls = 0
 let invalidNextSave = false
+let failNextBatch = false
+const batchDesignInputs = []
 let pauseAfterBatch = false
 let pausedResolve
 let resumeResolve
@@ -218,11 +229,18 @@ async function fakeEditor() {
           payload: { success: true, result: { nodes: liveDocument.children.map((node) => ({ ...node })) } },
         })
       } else if (message.method === 'batch-design') {
-        const match = /([A-Za-z][A-Za-z0-9_]*)=Insert\([^,]+,\{[^}]*name:\"([^\"]+)\"/.exec(message.payload.input || '')
-        assert.ok(match, 'unsupported simulation input')
-        liveDocument.children.push({ id: 'node-' + (liveDocument.children.length + 1), type: 'frame', name: match[2] })
+        const input = message.payload.input || ''
+        batchDesignInputs.push(input)
+        if (failNextBatch) {
+          failNextBatch = false
+          await postIpc({ id: message.id, type: 'response', method: message.method, payload: { success: false, error: 'simulated insert failure' } })
+          continue
+        }
+        const name = /["']?name["']?\s*:\s*"([^\"]+)"/.exec(input)?.[1]
+        assert.ok(name, 'unsupported simulation input')
+        liveDocument.children.push({ id: 'node-' + (liveDocument.children.length + 1), type: 'frame', name })
         canvasMutations += 1
-        await postIpc({ id: message.id, type: 'response', method: message.method, payload: { success: true, result: { message: 'Created ' + match[2] + ' on visible canvas' } } })
+        await postIpc({ id: message.id, type: 'response', method: message.method, payload: { success: true, result: { message: 'Created ' + name + ' on visible canvas' } } })
       } else if (message.method === 'save-document') {
         const content = invalidNextSave ? '{"version":"broken"}' : JSON.stringify(liveDocument)
         invalidNextSave = false
@@ -430,6 +448,63 @@ try {
   await waitFor(async () => (await http('/pen-host/state', { query })).json().file.endsWith('final.lib.pen'))
   assert.equal(fs.existsSync(path.join(workspace, 'variants', 'final.pen')), false)
   assert.deepEqual(diskState('variants/final.lib.pen').names, ['DiskWins', 'LocalWins', 'RetrySaved', 'SaveAsOnly'])
+
+  const chatMessages = [{
+    role: 'user',
+    content: [{ type: 'image', attachment: { attachmentId: 'chat-image-1', mediaType: 'image/png' } }],
+  }]
+  await eventHandlers.get('agent/pre-step')(
+    { agent: baseExec.agent, messages: chatMessages },
+    // A text-model wrapper may replace the raw ImageBlock downstream.
+    async () => ({ kind: 'enter', messages: [{ role: 'user', content: [{ type: 'text', text: '[图片转译]' }] }] }),
+  )
+  const insertedImage = await call('pencil_mcp_insert_image', {
+    image: 'latest', filePath: 'variants/final.lib.pen', name: 'Chat reference',
+    width: 640, height: 360, x: 24, y: 48, mode: 'fill',
+  })
+  assert.equal(readImages, 1)
+  assert.match(insertedImage.text, /resolved via chat-attachment/)
+  const imageInput = batchDesignInputs.at(-1)
+  const imageNode = JSON.parse(/Insert\([^,]+,\s*(\{.*\})\)$/.exec(imageInput)[1])
+  assert.deepEqual(imageNode, {
+    type: 'frame', name: 'Chat reference', width: 640, height: 360,
+    fill: { type: 'image', url: imageNode.fill.url, mode: 'fill' }, x: 24, y: 48,
+  })
+  assert.match(imageNode.fill.url, /^\.\/images\/pencil-.+\.png$/)
+  assert.equal(fs.existsSync(path.join(workspace, 'variants', imageNode.fill.url)), true)
+
+  const imagesDir = path.join(workspace, 'variants', 'images')
+  const imagesBeforeFailedInsert = fs.readdirSync(imagesDir).sort()
+  failNextBatch = true
+  const failedInsert = await tools.get('pencil_mcp_insert_image').execute({
+    image: 'recent:1', filePath: 'variants/final.lib.pen', name: 'Must roll back',
+  }, baseExec)
+  assert.equal(failedInsert.ok, false)
+  assert.match(failedInsert.text, /simulated insert failure/)
+  assert.deepEqual(fs.readdirSync(imagesDir).sort(), imagesBeforeFailedInsert)
+  const failedInput = batchDesignInputs.at(-1)
+  const failedNode = JSON.parse(/Insert\([^,]+,\s*(\{.*\})\)$/.exec(failedInput)[1])
+  assert.equal(failedNode.width, 400)
+  assert.equal(failedNode.height, 300)
+  assert.equal(failedNode.fill.mode, 'fit')
+
+  const imagesBeforeSaveFailure = fs.readdirSync(imagesDir).sort()
+  invalidNextSave = true
+  const saveFailedInsert = await tools.get('pencil_mcp_insert_image').execute({
+    image: 'latest', filePath: 'variants/final.lib.pen', name: 'Retained after save failure',
+  }, baseExec)
+  assert.equal(saveFailedInsert.ok, false)
+  assert.match(saveFailedInsert.text, /edit succeeded, but disk save failed/i)
+  assert.equal(fs.readdirSync(imagesDir).length, imagesBeforeSaveFailure.length + 1)
+  const recoveredImageSave = await http('/pen-host/save', { method: 'POST', query })
+  assert.equal(recoveredImageSave.status, 200, recoveredImageSave.text)
+
+  eventHandlers.get('session/disposed')(baseExec.agent.session)
+  const clearedImage = await tools.get('pencil_mcp_insert_image').execute({
+    image: 'latest', filePath: 'variants/final.lib.pen',
+  }, baseExec)
+  assert.equal(clearedImage.ok, false)
+  assert.match(clearedImage.text, /no conversation image matches "latest"/)
 
   running = false
   const unbound = await http('/pen-host/unbind', { method: 'POST', query })

@@ -104,10 +104,16 @@ when compatibility requires `status`, `login`, `workspaces`, `design`, and
 - `pencil_mcp_insert_image` — place an image onto the canvas using pen.dev's
   official image-fill: writes the image into `images/` next to the `.pen` and
   inserts a `frame` whose `fill` is `{type:"image", url, mode}`. Accepts a chat
-  image attachment id (from an image uploaded in this conversation) or a local
-  image file path; optional `parentId` / `width` / `height` / `x` / `y` / `mode`
-  (fit|fill|stretch). Width/height default to 400×300 when omitted (the engine
-  cannot auto-size an image-fill node).
+  image as `latest`, `recent:N` (`recent:1` = latest), an exact attachment id,
+  or a local image file path; optional `parentId` / `width` / `height` / `x` /
+  `y` / `mode` (fit|fill|stretch). Width/height default to 400×300 when omitted
+  (the engine cannot auto-size an image-fill node).
+
+Harness's native `read_image` and this tool have separate jobs: `read_image`
+loads pixels into an image-capable model's context, while
+`pencil_mcp_insert_image` copies the original attachment into the `.pen`
+workspace and places it on the canvas. This plugin does not replace or register
+`read_image`.
 
 ### Configuration
 
@@ -116,8 +122,10 @@ when compatibility requires `status`, `login`, `workspaces`, `design`, and
 - `text` — for DeepSeek and other non-multimodal models. Screenshots route to
   high-resolution rendering so image transcription stays reliable. Image
   transcription itself is **not provided by this plugin**: it depends on the
-  deployment's vision plugin (e.g. `dsh-vision-proxy`). Without one, images
-  reach the model only as markers.
+  deployment's image-capable wrapper (e.g. `dsh-vision-proxy` or the wrapper /
+  stealth route from `dsh-vision-router`). A direct text-only Harness route
+  rejects chat image input before this plugin runs and cannot consume image
+  tool results.
 - `multimodal` — native screenshots; the model sees the pixels itself.
 
 The setting card lives in **Settings → Plugins → dsh-with-pencil** and takes
@@ -293,16 +301,22 @@ not. See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 - `pencil_mcp_export_nodes` — 导出节点为图片文件（交付物）。
 - `pencil_mcp_insert_image` — 用 pen.dev 官方 image-fill 把图片放进画布：把图片写入
   `.pen` 旁的 `images/` 并插入一个 `fill:{type:"image",url,mode}` 的 frame。接受
-  聊天图片附件 id 或本地图片路径；可选 `parentId`/`width`/`height`/`x`/`y`/`mode`
-  （fit|fill|stretch）。未指定尺寸时默认 400×300（引擎无法对 image-fill 节点自动算尺寸）。
+  `latest`、`recent:N`（`recent:1` 即最新图片）、准确附件 id 或本地图片路径；可选
+  `parentId`/`width`/`height`/`x`/`y`/`mode`（fit|fill|stretch）。未指定尺寸时默认
+  400×300（引擎无法对 image-fill 节点自动算尺寸）。
+
+Harness 原生 `read_image` 与本工具职责不同：`read_image` 把像素送入具备图片能力的
+模型上下文，`pencil_mcp_insert_image` 则把原始附件复制到 `.pen` 工作区并放进画布。
+本插件不会替换或注册 `read_image`。
 
 ### 配置
 
 `visionMode`（设置 → 插件 → dsh-with-pencil，默认 `text`）：
 
 - `text` — 适用于 DeepSeek 等非多模态模型。截图自动走高清渲染，保证图片转译的可靠性。
-  **本插件不提供图片转译模块**：转译依赖部署方的视觉插件（如 `dsh-vision-proxy`）；
-  没有视觉插件时，图片对模型只显示为标记。
+  **本插件不提供图片转译模块**：转译依赖声明图片能力的包装路由（如
+  `dsh-vision-proxy` 或 `dsh-vision-router` 的 wrapper/stealth 路由）。Harness 的直连
+  纯文本路由会在本插件运行前拒绝聊天图片，也无法消费工具返回的图片结果。
 - `multimodal` — 使用原生截图，模型自己看像素。
 
 配置卡片位于 **设置 → 插件 → dsh-with-pencil**，保存后立即生效；首次安装默认
