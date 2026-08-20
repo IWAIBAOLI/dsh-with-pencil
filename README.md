@@ -222,8 +222,6 @@ The development-only profile fixture is available at
 - Cancelled requests that have not reached the editor are removed from its
   queue; delivered requests require a canvas-state check before retrying.
 
-Maintainers: see [`docs/ARCHITECTURE.md`](https://github.com/IWAIBAOLI/dsh-with-pencil/blob/main/docs/ARCHITECTURE.md) for the
-runtime design and [`docs/RELEASING.md`](https://github.com/IWAIBAOLI/dsh-with-pencil/blob/main/docs/RELEASING.md) for release gates.
 This integration is MIT licensed; official pen.dev and DeepSeek components are
 not. See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 
@@ -400,7 +398,5 @@ npx @deepseek-ai/dsh web
   打开前明确显示。
 - 尚未交付 editor 的取消请求会从队列删除；已交付的请求要求先检查画布状态再重试。
 
-维护者请参阅 [`docs/ARCHITECTURE.md`](https://github.com/IWAIBAOLI/dsh-with-pencil/blob/main/docs/ARCHITECTURE.md)（运行时设计）和
-[`docs/RELEASING.md`](https://github.com/IWAIBAOLI/dsh-with-pencil/blob/main/docs/RELEASING.md)（发布门槛）。本对接代码采用 MIT 许可；
-官方 pen.dev 与 DeepSeek 组件不属于该许可，详见
+本对接代码采用 MIT 许可；官方 pen.dev 与 DeepSeek 组件不属于该许可，详见
 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
