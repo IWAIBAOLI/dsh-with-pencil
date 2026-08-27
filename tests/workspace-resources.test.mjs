@@ -76,6 +76,34 @@ try {
   assert.match(generated.relativePath, /^\.\/images\/generated-.+\.png$/)
   assert.equal(fs.readFileSync(path.resolve(path.dirname(currentFile), generated.relativePath)).toString(), 'generated')
 
+  // An import can finish after the host switches files. Both the write and
+  // its returned relative URL must retain the document captured on entry.
+  const nextFile = path.join(workspace, 'variants', 'next.pen')
+  const pendingImport = resources.importFile(binding, { fileName: 'in-flight.png', fileContents: png })
+  binding.currentFile = nextFile
+  assert.equal((await pendingImport).filePath, './images/in-flight.png')
+  assert.deepEqual(fs.readFileSync(path.join(workspace, 'designs', 'images', 'in-flight.png')), png)
+  assert.equal(fs.existsSync(path.join(workspace, 'variants', 'images', 'in-flight.png')), false)
+  binding.currentFile = currentFile
+  const pendingBatch = resources.importFiles(binding, [
+    { fileName: 'batch-one.png', fileContents: png },
+    { fileName: 'batch-two.png', fileContents: png },
+  ])
+  binding.currentFile = nextFile
+  assert.deepEqual((await pendingBatch).map((item) => item.filePath), ['./images/batch-one.png', './images/batch-two.png'])
+  assert.equal(fs.existsSync(path.join(workspace, 'designs', 'images', 'batch-two.png')), true)
+  binding.currentFile = currentFile
+  const pendingUri = resources.importUri(binding, { uri: pathToFileURL(sourceFile).toString() })
+  binding.currentFile = nextFile
+  assert.equal((await pendingUri).filePath, '../source.svg')
+  binding.currentFile = currentFile
+  const pendingGenerated = resources.saveGeneratedImage(binding, { image: Buffer.from('in-flight generated').toString('base64') })
+  binding.currentFile = nextFile
+  const generatedDuringSwitch = await pendingGenerated
+  assert.match(generatedDuringSwitch.relativePath, /^\.\/images\//)
+  assert.equal(fs.readFileSync(path.resolve(path.dirname(currentFile), generatedDuringSwitch.relativePath), 'utf8'), 'in-flight generated')
+  binding.currentFile = currentFile
+
   const libraries = await resources.findLibraries(binding)
   assert.ok(libraries.includes(pathToFileURL(workspaceLibrary).toString()))
   assert.ok(libraries.includes(pathToFileURL(builtInLibrary).toString()))

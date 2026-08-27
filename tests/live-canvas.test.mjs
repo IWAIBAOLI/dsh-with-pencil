@@ -5,7 +5,8 @@ import { Readable } from 'node:stream'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import { getSessionDocument, getSessionFile } from '../lib/session-file.js'
 
 const toolFixture = new URL('./fixtures/dsh-tools.mjs', import.meta.url).href
 const schemasteryFixture = new URL('./fixtures/schemastery.mjs', import.meta.url).href
@@ -32,6 +33,7 @@ const eventHandlers = new Map()
 const sessions = new Map([['canvas-agent', { header: { cwd: workspace } }]])
 let savedImages = 0
 let readImages = 0
+let beforeReadImage
 let headlessSpawns = 0
 // Screenshots now run on the shared headless engine (the webview screenshot
 // is a viewport image that ignores nodeId), so `subprocess.spawn` must answer
@@ -123,6 +125,7 @@ const ctx = {
       async readImage(ref) {
         readImages += 1
         assert.equal(ref.attachmentId, 'chat-image-1')
+        if (beforeReadImage) await beforeReadImage()
         return {
           data: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64'),
           ref,
@@ -180,6 +183,9 @@ const query = { binding }
 let running = true
 let liveDocument = { version: '2.14', children: [], fileToken: 'canvas-test' }
 let liveFile = path.join(workspace, 'designs', 'design.pen')
+let rendererDocument = getSessionDocument('canvas-agent')
+let editorReloads = 0
+const saveTargets = []
 let canvasMutations = 0
 let selectedElements = []
 let exportNodeCalls = 0
@@ -191,16 +197,16 @@ let pausedResolve
 let resumeResolve
 
 async function postIpc(message) {
-  const response = await http('/pen-host/ipc', { method: 'POST', query, body: message })
+  const response = await http('/pen-host/ipc', {
+    method: 'POST', query,
+    body: { documentURI: rendererDocument.fileURI, documentRevision: rendererDocument.revision, ...message },
+  })
   assert.equal(response.status, 200, response.text)
+  return response.json()
 }
 
 async function requestIpc(method, payload) {
-  const response = await http('/pen-host/ipc', {
-    method: 'POST', query, body: { id: 'host-' + Date.now() + '-' + Math.random(), type: 'request', method, payload },
-  })
-  assert.equal(response.status, 200, response.text)
-  const message = response.json()
+  const message = await postIpc({ id: 'host-' + Date.now() + '-' + Math.random(), type: 'request', method, payload })
   assert.equal(message.error, undefined, message.error && message.error.message)
   return message.payload
 }
@@ -208,11 +214,21 @@ async function requestIpc(method, payload) {
 async function fakeEditor() {
   await postIpc({ id: 'editor-init', type: 'notification', method: 'initialized', payload: {} })
   while (running) {
-    const response = await http('/pen-host/pending', { query })
+    const response = await http('/pen-host/pending', { query: { ...query, documentRevision: rendererDocument.revision } })
+    if (!running) break
     assert.equal(response.status, 200, response.text)
     for (const message of response.json().messages || []) {
+      if (message.method === 'reload-editor' || (message.method === 'file-update' &&
+          (message.payload.fileURI !== rendererDocument.fileURI || message.payload.documentRevision !== rendererDocument.revision))) {
+        // Model the real bootstrap: the official editor's URI is immutable.
+        // A document switch recreates it; file-update alone cannot change it.
+        rendererDocument = getSessionDocument('canvas-agent')
+        editorReloads += 1
+        await postIpc({ id: 'editor-reload', type: 'notification', method: 'initialized', payload: {} })
+        break
+      }
       if (message.type === 'notification' && message.method === 'file-update') {
-        liveFile = String(message.payload.fileURI).replace(/^file:\/\//, '')
+        liveFile = fileURLToPath(message.payload.fileURI)
         liveDocument = JSON.parse(message.payload.content)
         continue
       }
@@ -241,6 +257,19 @@ async function fakeEditor() {
         liveDocument.children.push({ id: 'node-' + (liveDocument.children.length + 1), type: 'frame', name })
         canvasMutations += 1
         await postIpc({ id: message.id, type: 'response', method: message.method, payload: { success: true, result: { message: 'Created ' + name + ' on visible canvas' } } })
+      } else if (message.method === 'save') {
+        saveTargets.push(message.payload.uri)
+        const saved = structuredClone(liveDocument)
+        const destination = fileURLToPath(message.payload.uri)
+        const rebase = (value) => {
+          if (!value || typeof value !== 'object') return
+          if (value.type === 'image' && value.url && !/^[a-z]+:/i.test(value.url)) {
+            value.url = path.relative(path.dirname(destination), path.resolve(path.dirname(liveFile), value.url)).split(path.sep).join('/')
+          }
+          for (const child of Object.values(value)) rebase(child)
+        }
+        rebase(saved)
+        await postIpc({ id: message.id, type: 'response', method: message.method, payload: JSON.stringify(saved) })
       } else if (message.method === 'save-document') {
         const content = invalidNextSave ? '{"version":"broken"}' : JSON.stringify(liveDocument)
         invalidNextSave = false
@@ -303,6 +332,15 @@ try {
   )
 
   await call('pencil_mcp_open', { filePath: 'one.pen' })
+  assert.equal(getSessionFile('canvas-agent'), path.join(workspace, 'one.pen'))
+  assert.equal(rendererDocument.fileURI, pathToFileURL(liveFile).toString())
+  assert.equal(editorReloads, 1)
+  const originalContext = getSessionDocument('canvas-agent')
+  fs.writeFileSync(path.join(workspace, 'invalid.pen'), '{"version":"invalid"}')
+  const failedOpen = await tools.get('pencil_mcp_open').execute({ filePath: 'invalid.pen' }, baseExec)
+  assert.equal(failedOpen.ok, false)
+  assert.match(failedOpen.text, /Unsupported \.pen format/)
+  assert.equal(getSessionDocument('canvas-agent'), originalContext, 'failed open must retain the current document')
   const imported = await requestIpc('import-file', {
     fileName: 'agent-vision.png', fileContents: { __penBinaryBase64: Buffer.from('image-bytes').toString('base64') },
   })
@@ -366,8 +404,30 @@ try {
   assert.equal(overwrittenConflict.status, 200, overwrittenConflict.text)
   assert.deepEqual(diskState('one.pen').names, ['DiskWins', 'LocalWins'])
 
+  liveDocument.children[0].metadata = { savedBeforeSwitch: true }
+  await postIpc({ id: 'dirty-before-open', type: 'notification', method: 'file-changed', payload: {} })
   await call('pencil_mcp_open', { filePath: 'two.pen' })
+  assert.equal(JSON.parse(fs.readFileSync(path.join(workspace, 'one.pen'), 'utf8')).children[0].metadata.savedBeforeSwitch, true)
+  assert.equal(fs.existsSync(path.join(workspace, 'two.pen')), false, 'switch must not save old content into the new file')
   await call('pencil_mcp_open', { filePath: 'one.pen' })
+  const returnedContext = getSessionDocument('canvas-agent')
+  assert.ok(returnedContext.revision > originalContext.revision)
+  const staleImport = await postIpc({
+    id: 'stale-import', type: 'request', method: 'import-file',
+    documentURI: originalContext.fileURI, documentRevision: originalContext.revision,
+    payload: { fileName: 'stale.png', fileContents: { __penBinaryBase64: 'AQID' } },
+  })
+  assert.equal(staleImport.error.code, 'STALE_DOCUMENT')
+  assert.equal(fs.existsSync(path.join(workspace, 'images', 'stale.png')), false)
+  const beforeLateSave = fs.readFileSync(path.join(workspace, 'one.pen'), 'utf8')
+  await postIpc({
+    id: 'stale-save', type: 'notification', method: 'save-resource',
+    documentURI: originalContext.fileURI, documentRevision: originalContext.revision,
+    payload: { content: JSON.stringify({ version: '2.14', children: [] }) },
+  })
+  assert.equal(fs.readFileSync(path.join(workspace, 'one.pen'), 'utf8'), beforeLateSave)
+  const stalePoll = await http('/pen-host/pending', { query: { ...query, documentRevision: originalContext.revision } })
+  assert.equal(stalePoll.json().messages[0].method, 'reload-editor')
   const reopened = await call('pencil_mcp_get_app_state', { include_schema: false })
   assert.match(reopened.text, /DiskWins/)
   assert.match(reopened.text, /LocalWins/)
@@ -420,13 +480,22 @@ try {
   assert.equal((await http('/pen-host/state', { query })).json().saveError, null)
   assert.deepEqual(diskState('one.pen').names, ['DiskWins', 'LocalWins', 'RetrySaved'])
 
-  liveDocument.children.push({ id: 'save-as-only', type: 'frame', name: 'SaveAsOnly' })
+  liveDocument.children.push({ id: 'save-as-only', type: 'frame', name: 'SaveAsOnly', fill: { type: 'image', url: 'images/agent-vision.png' } })
   await postIpc({ id: 'dirty-save-as', type: 'notification', method: 'file-changed', payload: {} })
   const savedAs = await http('/pen-host/save-as', { method: 'POST', query, body: { file: 'variants/final.pen' } })
   assert.equal(savedAs.status, 200, savedAs.text)
   await waitFor(() => liveFile === path.join(workspace, 'variants', 'final.pen'))
   assert.deepEqual(diskState('one.pen').names, ['DiskWins', 'LocalWins', 'RetrySaved'])
   assert.deepEqual(diskState('variants/final.pen').names, ['DiskWins', 'LocalWins', 'RetrySaved', 'SaveAsOnly'])
+  assert.equal(saveTargets.at(-1), pathToFileURL(liveFile).toString(), 'Save As must use the official target-aware serializer')
+  const savedImageUrl = JSON.parse(fs.readFileSync(liveFile, 'utf8')).children.at(-1).fill.url
+  assert.equal(savedImageUrl, '../images/agent-vision.png')
+  assert.equal(fs.readFileSync(path.resolve(path.dirname(liveFile), savedImageUrl), 'utf8'), 'image-bytes')
+  const afterSwitchImport = await requestIpc('import-file', { fileName: 'after-switch.png', fileContents: { __penBinaryBase64: 'AQID' } })
+  const afterSwitchUri = new URL(afterSwitchImport.filePath, rendererDocument.fileURI).toString()
+  assert.equal(afterSwitchUri, pathToFileURL(path.join(workspace, 'variants', 'images', 'after-switch.png')).toString())
+  assert.equal((await requestIpc('read-file', afterSwitchUri)).__penBinaryBase64, 'AQID')
+  assert.equal(fs.existsSync(path.join(workspace, 'images', 'after-switch.png')), false)
   const refusedOverwrite = await http('/pen-host/save-as', { method: 'POST', query, body: { file: 'one.pen' } })
   assert.equal(refusedOverwrite.status, 409)
   assert.match(refusedOverwrite.text, /already exists/)
@@ -474,6 +543,30 @@ try {
   assert.equal(fs.existsSync(path.join(workspace, 'variants', imageNode.fill.url)), true)
 
   const imagesDir = path.join(workspace, 'variants', 'images')
+  const readsBeforeMismatch = readImages
+  const mismatchedImage = await tools.get('pencil_mcp_insert_image').execute({ image: 'latest', filePath: 'one.pen' }, baseExec)
+  assert.equal(mismatchedImage.ok, false)
+  assert.match(mismatchedImage.text, /filePath differs.*pencil_mcp_open/)
+  assert.equal(readImages, readsBeforeMismatch, 'mismatched targets must be refused before reading or writing the asset')
+
+  let imageReadStarted
+  let resumeImageRead
+  const startedReading = new Promise((resolve) => { imageReadStarted = resolve })
+  const waitForRead = new Promise((resolve) => { resumeImageRead = resolve })
+  beforeReadImage = async () => { imageReadStarted(); await waitForRead }
+  const beforeRacingInsert = fs.readdirSync(imagesDir).sort()
+  const racingInsert = tools.get('pencil_mcp_insert_image').execute({ image: 'latest', name: 'Must not cross documents' }, baseExec)
+  await startedReading
+  await call('pencil_mcp_open', { filePath: 'race/other.pen' })
+  resumeImageRead()
+  const raced = await racingInsert
+  beforeReadImage = undefined
+  assert.equal(raced.ok, false)
+  assert.match(raced.text, /document changed/)
+  assert.equal(liveDocument.children.length, 0, 'an in-flight image must not be inserted into the new document')
+  assert.deepEqual(fs.readdirSync(imagesDir).sort(), beforeRacingInsert, 'a rejected stale insert must not leave an orphan image')
+  await call('pencil_mcp_open', { filePath: 'variants/final.lib.pen' })
+
   const imagesBeforeFailedInsert = fs.readdirSync(imagesDir).sort()
   failNextBatch = true
   const failedInsert = await tools.get('pencil_mcp_insert_image').execute({
@@ -499,16 +592,52 @@ try {
   const recoveredImageSave = await http('/pen-host/save', { method: 'POST', query })
   assert.equal(recoveredImageSave.status, 200, recoveredImageSave.text)
 
-  eventHandlers.get('session/disposed')(baseExec.agent.session)
+  const refusedMove = await http('/pen-host/rename', { method: 'POST', query, body: { file: 'one.pen', name: 'moved/inactive.pen' } })
+  assert.equal(refusedMove.status, 409, 'moving an inactive document cannot silently retain the wrong resource base')
+  assert.match(refusedMove.text, /open this file/)
+  assert.equal(fs.existsSync(path.join(workspace, 'one.pen')), true)
+  assert.equal(fs.existsSync(path.join(workspace, 'moved', 'inactive.pen')), false)
+  const moved = await http('/pen-host/rename', {
+    method: 'POST', query, body: { file: 'variants/final.lib.pen', name: 'moved/deeper/final.pen' },
+  })
+  assert.equal(moved.status, 200, moved.text)
+  await waitFor(() => liveFile === path.join(workspace, 'moved', 'deeper', 'final.pen'))
+  assert.equal(fs.existsSync(path.join(workspace, 'variants', 'final.lib.pen')), false)
+  const movedFill = JSON.parse(fs.readFileSync(liveFile, 'utf8')).children.find((node) => node.id === 'save-as-only').fill
+  assert.equal(movedFill.url, '../../images/agent-vision.png')
+  assert.equal(fs.readFileSync(path.resolve(path.dirname(liveFile), movedFill.url), 'utf8'), 'image-bytes')
+
+  const specialFile = path.join(workspace, '中文 #100%', '当前文件.pen')
+  fs.mkdirSync(path.dirname(specialFile), { recursive: true })
+  fs.writeFileSync(specialFile, JSON.stringify({ version: '2.14', children: [] }))
+  await postIpc({ id: 'native-open', type: 'notification', method: 'load-file', payload: { fileURI: pathToFileURL(specialFile).toString() } })
+  await waitFor(() => liveFile === specialFile)
+  assert.equal(getSessionFile('canvas-agent'), specialFile, 'official load-file URI must use the same document switch coordinator')
+  const specialImport = await requestIpc('import-file', { fileName: 'special.png', fileContents: { __penBinaryBase64: 'AQID' } })
+  assert.equal((await requestIpc('read-file', new URL(specialImport.filePath, rendererDocument.fileURI).toString())).__penBinaryBase64, 'AQID')
+
+  const retainedFile = getSessionFile('canvas-agent')
+  running = false
+  const unbound = await http('/pen-host/unbind', { method: 'POST', query })
+  assert.equal(unbound.status, 200, unbound.text)
+  assert.equal(getSessionFile('canvas-agent'), retainedFile, 'closing the canvas must preserve the conversation document')
+  await editorLoop
+  await call('pencil_mcp_get_app_state', { include_schema: false })
+  assert.equal(getSessionFile('canvas-agent'), retainedFile, 'headless handoff must use the same document')
+  await call('pencil_mcp_open', { filePath: 'headless-next.pen' })
+  assert.equal(getSessionFile('canvas-agent'), path.join(workspace, 'headless-next.pen'))
+  const rebound = await http('/pen-host/bind', { method: 'POST', body: { sessionId: 'canvas-agent', workspace } })
+  assert.equal(rebound.status, 200, rebound.text)
+  assert.equal(rebound.json().file, getSessionFile('canvas-agent'), 'canvas rebinding must not reset the headless current file')
+  await eventHandlers.get('session/disposed')(baseExec.agent.session)
+  assert.equal(getSessionFile('canvas-agent'), null, 'only session disposal clears the document identity')
+  assert.equal((await http('/pen-host/state', { query: { binding: rebound.json().binding } })).status, 401)
   const clearedImage = await tools.get('pencil_mcp_insert_image').execute({
     image: 'latest', filePath: 'variants/final.lib.pen',
   }, baseExec)
   assert.equal(clearedImage.ok, false)
   assert.match(clearedImage.text, /no conversation image matches "latest"/)
 
-  running = false
-  const unbound = await http('/pen-host/unbind', { method: 'POST', query })
-  assert.equal(unbound.status, 200, unbound.text)
   const releasedState = await http('/pen-host/state', { query })
   assert.equal(releasedState.status, 401)
   console.log('live canvas routing and persistence: ok')

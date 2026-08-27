@@ -11,6 +11,8 @@ const checks = [
   'tests/dev-install.test.cjs',
   'tests/editor-installer.test.mjs',
   'tests/host-components.test.mjs',
+  'tests/session-file.test.mjs',
+  'tests/editor-document-context.test.mjs',
   'tests/workspace-path.test.mjs',
   'tests/workspace-resources.test.mjs',
   'tests/session-images.test.mjs',

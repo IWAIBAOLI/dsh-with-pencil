@@ -6,6 +6,21 @@ All notable changes to this project are documented here. Versions follow
 
 ## Unreleased
 
+## 0.5.5 - 2026-08-28
+
+- Fix blank image fills after switching `.pen` files: use one session document
+  identity and reinitialize the unchanged official editor when its file URI
+  changes. Encode special characters in paths and reject stale editor messages
+  by document revision, including A → B → A switches.
+- Use the official target-aware serializer for Save As and active
+  cross-directory moves, preserving image/resource references on reopening.
+- Keep the current document across canvas/headless handoffs, validate files
+  before switching, and pin async image imports/insertion to their originating
+  document. Refuse mismatched image-insertion targets instead of writing assets
+  next to one file and inserting them into another.
+- Add document-identity, bootstrap, stale-message, image-path, Save As, move,
+  handoff, and import-race regression coverage.
+
 ## 0.5.4 - 2026-08-20
 
 - Add a fixed local-development pipeline (`npm run dev:install`) that tests,

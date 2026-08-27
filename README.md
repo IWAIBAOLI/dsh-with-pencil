@@ -200,12 +200,17 @@ The development-only profile fixture is available at
 - The toolbar contains workspace, `.pen` file, export, layout, and close
   controls. These plugin-owned controls follow the active Harness language;
   the official Pencil editor keeps its upstream English interface.
-- The editor iframe stays mounted within its conversation, including when the
-  Agent changes the active file.
+- The iframe container stays mounted within its conversation. Switching `.pen`
+  files saves the previous document and reloads the official editor with the new
+  file URI; its internal resource base is fixed at initialization. This resets
+  transient selection/undo state for the newly opened document.
 - Manual edits autosave every six seconds; Agent edits await a save after every
   successful operation.
 - Save As writes a new `.pen` inside the workspace, never overwrites an existing
-  target, switches the canvas to the copy, and leaves the source unchanged.
+  target, switches the canvas to the copy, and leaves the source unchanged. The
+  official serializer rebases resource URLs for the destination; assets remain
+  in their existing locations. Cross-directory moves require opening the source
+  in the canvas first so the same serializer can preserve its resources.
 - Export uses the live editor state: it writes the selected nodes, or every
   top-level node when nothing is selected, as 2× PNG files or a PDF under
   `exports/<document-name>/`. The result menu can open that folder directly.
@@ -221,6 +226,17 @@ The development-only profile fixture is available at
   iframe opens.
 - Cancelled requests that have not reached the editor are removed from its
   queue; delivered requests require a canvas-state check before retrying.
+
+The integration's `lib/session-file.js` owns the conversation's current `.pen`
+path, encoded file URI, directory, and switch revision. The canvas, resource
+imports, and headless fallback all use that identity; closing a renderer does
+not clear it. A dropped image travels through the official editor's binary
+import request → host writes to the current `.pen`'s `images/` → relative URL
+returned → editor resolves it against that same file URI → host reads bytes →
+official image fill renders. Late messages from a previous document revision
+are rejected. `pencil_mcp_insert_image` also refuses a mismatched `filePath` or a
+document switch during asset preparation; call `pencil_mcp_open` first to select
+a different file. No official editor source or bundle is patched.
 
 This integration is MIT licensed; official pen.dev and DeepSeek components are
 not. See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
@@ -385,9 +401,11 @@ npx @deepseek-ai/dsh web
 - 画布外框和 Pencil editor 自动跟随 Harness/系统的明暗主题；插件不增加单独的主题开关。
 - 顶栏提供工作区、`.pen` 文件、导出、布局和关闭操作。这些插件自有控件跟随当前 Harness
   语言；官方 Pencil editor 保持其上游英文界面。
-- editor iframe 在当前会话中保持挂载，Agent 切换文件时不会因重建 iframe 丢失引擎。
+- iframe 容器在当前会话中保持挂载。切换 `.pen` 时先保存旧文档，再以新文件 URI
+  重新初始化官方 editor，因为它的资源基准路径在初始化时固定；新打开文档的选区和撤销历史会重置。
 - 用户手工编辑每 6 秒触发保存；Agent 编辑逐次等待保存确认。
 - “另存为”在工作区内创建新的 `.pen`，拒绝覆盖已有文件，自动切换到副本并保持原文件不变。
+  由官方序列化接口按目标位置转换资源相对路径，素材保留在原位置；跨目录移动需先在画布打开源文件。
 - 导出直接读取当前可见 editor：有选区时导出选区，否则导出全部顶层元素；可输出 2× PNG
   或 PDF 到 `exports/<文档名>/`，并从结果菜单直接打开该文件夹。
 - 导入和生成的图片保存到设计旁的 `images/`；SVG 由官方 editor 转换成节点。
@@ -397,6 +415,14 @@ npx @deepseek-ai/dsh web
 - 固定版本 editor 只在首次打开画布时下载；下载、校验、解压或兼容性错误会在空白 iframe
   打开前明确显示。
 - 尚未交付 editor 的取消请求会从队列删除；已交付的请求要求先检查画布状态再重试。
+
+接入层的 `lib/session-file.js` 统一管理会话当前 `.pen` 的绝对路径、编码后的文件 URI、
+所在目录及切换版本。画布、图片导入与无界面引擎都使用这份身份；关闭渲染器不会清空当前文件。
+拖图链路为：官方 editor 发送图片字节 → 宿主存入当前 `.pen` 旁的 `images/` → 返回相对路径
+→ editor 基于同一个文件 URI 解析 → 宿主读取图片字节 → 官方图片填充渲染。
+旧文档版本的迟到消息会被拒绝；`pencil_mcp_insert_image` 也会拒绝与当前文件不一致的
+`filePath` 或准备图片期间的文件切换。要操作其他文件，请先调用 `pencil_mcp_open`。
+整个过程不修改官方 editor 源码或打包文件。
 
 本对接代码采用 MIT 许可；官方 pen.dev 与 DeepSeek 组件不属于该许可，详见
 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
