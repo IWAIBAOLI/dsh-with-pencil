@@ -10,6 +10,9 @@ const { pathToFileURL } = require('node:url')
 
 const root = path.resolve(__dirname, '..')
 const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'))
+const profileTemplate = JSON.parse(fs.readFileSync(path.join(root, 'profiles/dsh-with-pencil-template/package.json'), 'utf8'))
+const harnessVersion = profileTemplate.dependencies['@deepseek-ai/dsh-base']
+if (!/^\d+\.\d+\.\d+/.test(harnessVersion)) throw new Error('profile template must pin a DSH version')
 
 function usage() {
   console.log(`Usage: node scripts/dev-install.cjs [options]
@@ -133,11 +136,11 @@ function main() {
   const profileDir = path.join(dshHome, 'profiles', options.profile)
   removeLinkOverride(profileDir)
   run('npx', [
-    '--yes', '@deepseek-ai/dsh', 'plugin', '--profile', options.profile,
+    '--yes', '@deepseek-ai/dsh@' + harnessVersion, 'plugin', '--profile', options.profile,
     'add', pathToFileURL(snapshot.artifact).href,
   ])
   verifyInstalled(profileDir, snapshot.metadata.files)
-  console.log('Restart required: stop the current DSH process, then run `npx @deepseek-ai/dsh web`.')
+  console.log('Restart required: stop the current DSH process, then run `npx @deepseek-ai/dsh@' + harnessVersion + ' web`.')
 }
 
 try {

@@ -16,6 +16,6 @@
 - insert:
     - id: dsh-with-pencil
       name: 'dsh-with-pencil'
-      inject: ['tools', 'llm', 'subprocess', 'sandboxPolicy', 'webServer', 'sessions', 'attachments', 'systemPrompt']
+      inject: ['tools', 'subprocess', 'sandboxPolicy', 'webServer', 'sessions', 'attachments', 'systemPrompt', 'llm']
       config:
-        visionMode: text
+        visionMode: multimodal

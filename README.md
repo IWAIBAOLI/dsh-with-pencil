@@ -27,8 +27,8 @@ with DSH. It is independent and is not endorsed by pen.dev or DeepSeek.
 - Workspace-safe file opening, creation, Save As, live PNG/PDF export, imports,
   generated images, design libraries, external-change reloads, and conflict
   resolution.
-- A responsive 42% split view with pointer-safe resizing and an optional
-  floating layout.
+- A native DSH right-Sidebar tab with the built-in split, resize, float, and
+  session layout restoration controls.
 
 The plugin registers nine core model tools:
 
@@ -51,15 +51,15 @@ Send this prompt once in a normal Harness conversation:
 > fixed official tools.
 >
 > Assign these Pencil design tools to the preset, and no other design tools:
-> `pencil_mcp_open`, `pencil_mcp_get_app_state`,
+> `pencil_mcp_open`, `pencil_mcp_get_app_state`, `pencil_mcp_batch_get`,
 > `pencil_mcp_get_guidelines`, `pencil_mcp_execute`,
 > `pencil_mcp_get_screenshot`, `pencil_mcp_export_html`,
-> `pencil_mcp_export_nodes`, and `pencil_mcp_insert_image`. Also bind one
-> available vision tool and put its
-> exact name in the persona; if none is available, ask the user.
+> `pencil_mcp_export_nodes`, and `pencil_mcp_insert_image`. Bind Harness
+> `read_image` if available for local image files. With DeepSeek-V4.1-Flash,
+> the model can inspect screenshot attachments directly.
 >
 > The persona must tell the Agent to complete `.pen` design tasks directly using
-> only the design and vision tools assigned to this preset. Before calling a
+> only the tools assigned to this preset. Before calling a
 > tool, read its own description and parameter definitions in the Agent's
 > available-tools list; those descriptions are the complete usage reference —
 > do not search for, probe, or verify usage anywhere else.
@@ -68,15 +68,14 @@ Send this prompt once in a normal Harness conversation:
 > `pencil_mcp_open` to create a `.pen` file inside the workspace, then edit, take
 > screenshots, and visually verify it until it is saved. Verify visually with
 > `pencil_mcp_get_screenshot` (a visual-fidelity spot check: colors, font
-> rendering, alignment/spacing, layout positions; large nodes render at high
-> resolution automatically). Verify text and property content with
+> rendering, alignment/spacing, layout positions). Verify text and property content with
 > `pencil_mcp_batch_get` (node reads). Use
 > `pencil_mcp_export_nodes` only for deliverable files. Do not use unspecified
 > design tools or inspect any source code or repository to find tools or study
 > their usage. Prefer the assigned design tools for `.pen` edits; do not treat
 > direct JSON editing as the default.
 >
-> When finished, report the preset name/path, the bound vision tool, and how to
+> When finished, report the preset name/path and how to
 > select the preset. Do not modify any other preset.
 
 Five legacy one-shot CLI helpers are hidden by default to avoid duplicated
@@ -96,9 +95,9 @@ when compatibility requires `status`, `login`, `workspaces`, `design`, and
 - `pencil_mcp_execute` — edit the document with a JS snippet
   (`Update`/`Insert`/`Copy`/`Delete`/`Move`/`Set`/`Replace`).
 - `pencil_mcp_get_screenshot` — visual-fidelity spot check (colors, fonts,
-  alignment). Large nodes and whole documents render at high resolution
-  automatically; with the canvas closed you get a compressed screenshot and a
-  hint to open the canvas.
+  alignment). The default native-vision path uses Pencil's native screenshot;
+  the vision-translation mode uses high-resolution export for large nodes and
+  whole documents when the canvas is open.
 - `pencil_mcp_export_html` — export nodes to HTML.
 - `pencil_mcp_export_nodes` — export nodes to image files (deliverables).
 - `pencil_mcp_insert_image` — place an image onto the canvas using pen.dev's
@@ -117,34 +116,40 @@ workspace and places it on the canvas. This plugin does not replace or register
 
 ### Configuration
 
-`visionMode` (Settings → Plugins → dsh-with-pencil, default `text`):
+`visionMode` (Plugins → dsh-with-pencil → Configure, default `multimodal`):
 
-- `text` — for DeepSeek and other non-multimodal models. Screenshots route to
-  high-resolution rendering so image transcription stays reliable. Image
-  transcription itself is **not provided by this plugin**: it depends on the
-  deployment's image-capable wrapper (e.g. `dsh-vision-proxy` or the wrapper /
-  stealth route from `dsh-vision-router`). A direct text-only Harness route
-  rejects chat image input before this plugin runs and cannot consume image
-  tool results.
-- `multimodal` — native screenshots; the model sees the pixels itself.
+- `multimodal` — native screenshots for an image-capable model. The default
+  Harness `deepseek-flash` entry is DeepSeek-V4.1-Flash and declares image
+  input. No separate image-transcription plugin is needed for this route.
+- `text` — high-resolution screenshots and a visual-fidelity instruction for
+  an image-capable *vision-translation wrapper* (for example,
+  `dsh-vision-proxy` or a `dsh-vision-router` wrapper). This plugin does not
+  translate images itself. A direct text-only Harness route cannot consume
+  screenshot attachments, even with this setting.
 
-The setting card lives in **Settings → Plugins → dsh-with-pencil** and takes
-effect immediately after saving. First installs default to `text`.
-
-For implementation details see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+The plugin checks the active session route's declared image input before each
+screenshot. The setting takes effect immediately after saving. If a profile
+already has an explicit `text` override, use **Reset to default** to select
+native vision. The default `deepseek-v4-pro` entry is text-only, so it cannot
+consume screenshots. Custom model catalog entries must declare image input
+themselves.
 
 ### Install
 
-With a working DeepSeek Harness Web profile, install the npm bundle:
+Version `0.6.0` targets Harness `0.1.7-rc.2` only. Configure `visionMode`
+again in the new Plugins page after upgrading from an older Harness.
+
+After `0.6.0` is published, install the npm bundle into a DeepSeek Harness
+`0.1.7-rc.2` Web profile:
 
 ```bash
-npx @deepseek-ai/dsh plugin --profile web add dsh-with-pencil
+npx @deepseek-ai/dsh@0.1.7-rc.2 plugin --profile web add dsh-with-pencil@0.6.0
 ```
 
 Restart DSH Web after installation (`Ctrl-C` the running process first):
 
 ```bash
-npx @deepseek-ai/dsh web
+npx @deepseek-ai/dsh@0.1.7-rc.2 web
 ```
 
 That is the complete normal installation. The npm bundle installs the pinned
@@ -162,7 +167,7 @@ For local development from this checkout:
 
 ```bash
 npm run dev:install -- --profile web
-npx @deepseek-ai/dsh web
+npx @deepseek-ai/dsh@0.1.7-rc.2 web
 ```
 
 `dev:install` runs the complete test suite, packs the exact publishable files
@@ -193,13 +198,16 @@ The development-only profile fixture is available at
 
 ### Canvas behavior
 
-- The first open uses a 42% right split. Resizing persists as a viewport ratio;
-  the canvas can also float.
+- The conversation button opens a `pen.dev Canvas` tab in DSH's right Sidebar.
+  DSH owns tab placement, split, resize, float, and per-session layout recovery.
+  Reopening the canvas focuses its existing tab.
 - The canvas chrome and Pencil editor follow the active Harness/system light or
   dark theme automatically; the plugin adds no separate theme control.
-- The toolbar contains workspace, `.pen` file, export, layout, and close
-  controls. These plugin-owned controls follow the active Harness language;
-  the official Pencil editor keeps its upstream English interface.
+- The toolbar contains workspace, `.pen` file, and export controls. DSH provides
+  the tab and layout controls. Plugin-owned controls follow the active Harness
+  language; the official Pencil editor keeps its upstream English interface.
+- Closing the tab saves pending canvas edits before releasing the live editor.
+  If saving fails, the tab stays open and shows the error for a retry.
 - The iframe container stays mounted within its conversation. Switching `.pen`
   files saves the previous document and reloads the official editor with the new
   file URI; its internal resource base is fixed at initialization. This resets
@@ -260,7 +268,7 @@ not. See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 - 将画布选区注入下一轮 Agent 上下文，并把 Pencil 截图作为真正的图片附件返回。
 - 在会话工作区边界内提供文件打开、新建、另存为、实时 PNG/PDF 导出、资源导入、
   生成图片、设计库、外部修改重载和冲突处理。
-- 默认 42% 的响应式右侧分屏，拖动过程中保持指针控制，也可切成浮动窗口。
+- 使用 DSH 原生右侧栏标签页，支持内置分屏、调整宽度、浮窗和按会话恢复布局。
 
 插件默认注册 9 个核心模型工具：
 
@@ -282,25 +290,26 @@ not. See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 > 基于标准编码 Preset，保留官方固定工具。
 >
 > 为该 Preset 指定以下 Pencil 设计工具：`pencil_mcp_open`、
-> `pencil_mcp_get_app_state`、`pencil_mcp_get_guidelines`、
+> `pencil_mcp_get_app_state`、`pencil_mcp_batch_get`、`pencil_mcp_get_guidelines`、
 > `pencil_mcp_execute`、`pencil_mcp_get_screenshot`、
 > `pencil_mcp_export_html`、`pencil_mcp_export_nodes`、
 > `pencil_mcp_insert_image`，不再指定其他设计工具。
-> 同时绑定一个可用的视觉工具，并把准确工具名写入 Persona；没有视觉工具则询问用户。
+> 如有 Harness `read_image`，可绑定它读取本地图片。DeepSeek-V4.1-Flash 可直接查看
+> 截图工具返回的图片附件。
 >
-> Persona 应要求 Agent 直接完成 `.pen` 设计任务，只使用该 Preset 指定的设计工具和视觉
-> 工具。调用前查看 Agent 可用工具列表中这些工具自带的说明和参数定义；这些说明即完整
+> Persona 应要求 Agent 直接完成 `.pen` 设计任务，只使用该 Preset 指定的工具。
+> 调用前查看 Agent 可用工具列表中这些工具自带的说明和参数定义；这些说明即完整
 > 用法，不得再去其他地方查找、试探测或验证用法。
 >
 > Persona 应要求 Agent 在新建设计时，先用 `pencil_mcp_open` 创建工作区内的 `.pen`
 > 文件，再使用指定工具编辑、截图并进行视觉验证，直至保存完成。视觉验证使用
 > `pencil_mcp_get_screenshot` 做视觉保真抽查（颜色、字体渲染、对齐/间距、布局
-> 位置；大节点与整文档自动走高清渲染）。文字与属性内容用
+> 位置）。文字与属性内容用
 > `pencil_mcp_batch_get` 按节点读取验证。`pencil_mcp_export_nodes` 仅用于交付
 > 文件产物。不得使用未指定的设计工具，不得通过翻查任何源码或仓库来寻找工具、研究
 > 用法。编辑 `.pen` 时优先使用指定设计工具，不把直接修改 JSON 作为默认方式。
 >
-> 创建完成后，报告 Preset 名称或路径、绑定的视觉工具和选择方法；不要修改其他 Preset。
+> 创建完成后，报告 Preset 名称或路径及选择方法；不要修改其他 Preset。
 
 为避免重复能力和无关上下文，5 个旧的一次性 CLI 助手默认隐藏。仅在兼容需要时设置
 `DSH_PEN_LEGACY_TOOLS=1`，恢复 `status`、`login`、`workspaces`、`design` 和
@@ -315,8 +324,8 @@ not. See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 - `pencil_mcp_get_guidelines` — 设计指南与样式。
 - `pencil_mcp_execute` — 用 JS 片段编辑文档（`Update`/`Insert`/`Copy`/`Delete`/
   `Move`/`Set`/`Replace`）。
-- `pencil_mcp_get_screenshot` — 视觉保真抽查（颜色、字体、对齐）。大节点与整文档自动
-  走高清渲染；画布未打开时返回压缩截图并提示打开画布。
+- `pencil_mcp_get_screenshot` — 视觉保真抽查（颜色、字体、对齐）。默认的原生视觉
+  路径使用 Pencil 原生截图；图像转译模式在画布打开时对大节点和整文档使用高清导出。
 - `pencil_mcp_export_html` — 导出节点为 HTML。
 - `pencil_mcp_export_nodes` — 导出节点为图片文件（交付物）。
 - `pencil_mcp_insert_image` — 用 pen.dev 官方 image-fill 把图片放进画布：把图片写入
@@ -331,31 +340,34 @@ Harness 原生 `read_image` 与本工具职责不同：`read_image` 把像素送
 
 ### 配置
 
-`visionMode`（设置 → 插件 → dsh-with-pencil，默认 `text`）：
+`visionMode`（插件 → dsh-with-pencil → 配置，默认 `multimodal`）：
 
-- `text` — 适用于 DeepSeek 等非多模态模型。截图自动走高清渲染，保证图片转译的可靠性。
-  **本插件不提供图片转译模块**：转译依赖声明图片能力的包装路由（如
-  `dsh-vision-proxy` 或 `dsh-vision-router` 的 wrapper/stealth 路由）。Harness 的直连
-  纯文本路由会在本插件运行前拒绝聊天图片，也无法消费工具返回的图片结果。
-- `multimodal` — 使用原生截图，模型自己看像素。
+- `multimodal` — 适用于支持图片输入的模型，使用原生截图。Harness 默认的
+  `deepseek-flash` 条目对应 DeepSeek-V4.1-Flash，已声明图片输入；这条路由不需要
+  额外的图片转译插件。
+- `text` — 仅供支持图片输入的**图像转译包装路由**使用，提供高清截图及视觉保真
+  提示；例如 `dsh-vision-proxy` 或 `dsh-vision-router` 的包装路由。本插件本身不做
+  图片转译。Harness 直连纯文本路由即使选择此模式，也无法消费截图附件。
 
-配置卡片位于 **设置 → 插件 → dsh-with-pencil**，保存后立即生效；首次安装默认
-`text`。
-
-实现细节见 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)。
+插件在每次截图前检查当前会话路由是否声明图片输入。配置保存后立即生效；如果
+Profile 已显式保存 `text`，请点**重置为默认**切回原生视觉。自定义模型目录条目须
+自行声明图片输入。默认的 `deepseek-v4-pro` 条目仅支持文字，因此不能消费截图。
 
 ### 安装
 
-在已有可用 DeepSeek Harness Web profile 的前提下，安装 npm Bundle：
+`0.6.0` 仅支持 Harness `0.1.7-rc.2`。从旧版 Harness 升级后，请在新版插件页重新设置
+`visionMode`。
+
+`0.6.0` 发布后，在已有 DeepSeek Harness `0.1.7-rc.2` Web profile 中安装 npm Bundle：
 
 ```bash
-npx @deepseek-ai/dsh plugin --profile web add dsh-with-pencil
+npx @deepseek-ai/dsh@0.1.7-rc.2 plugin --profile web add dsh-with-pencil@0.6.0
 ```
 
 安装完成后重启 DSH Web（先用 `Ctrl-C` 停止正在运行的进程）：
 
 ```bash
-npx @deepseek-ai/dsh web
+npx @deepseek-ai/dsh@0.1.7-rc.2 web
 ```
 
 这就是正常情况下的完整安装步骤。npm Bundle 会安装固定版本的官方 `@pen.dev/cli`。
@@ -371,7 +383,7 @@ npm 包本身不复制或再分发 browser editor。离线环境可以预先下�
 
 ```bash
 npm run dev:install -- --profile web
-npx @deepseek-ai/dsh web
+npx @deepseek-ai/dsh@0.1.7-rc.2 web
 ```
 
 `dev:install` 会先运行完整测试，再把实际可发布文件打成文件名带内容哈希的唯一 tarball，
@@ -397,10 +409,12 @@ npx @deepseek-ai/dsh web
 
 ### 画布行为
 
-- 首次打开为 42% 右侧分屏；拖动后按视口比例保存，也可切成浮动窗口。
+- 会话按钮会在 DSH 右侧栏打开 `pen.dev 画布` 标签页。DSH 负责标签页位置、
+  分屏、调整宽度、浮窗和按会话恢复布局；再次打开会定位到已有标签页。
 - 画布外框和 Pencil editor 自动跟随 Harness/系统的明暗主题；插件不增加单独的主题开关。
-- 顶栏提供工作区、`.pen` 文件、导出、布局和关闭操作。这些插件自有控件跟随当前 Harness
-  语言；官方 Pencil editor 保持其上游英文界面。
+- 画布顶栏提供工作区、`.pen` 文件和导出操作；标签页与布局操作由 DSH 提供。
+  插件自有控件跟随当前 Harness 语言；官方 Pencil editor 保持其上游英文界面。
+- 关闭标签页前会先保存待写入的画布修改，再释放在线编辑器；若保存失败，标签页会保留并显示错误，供重试。
 - iframe 容器在当前会话中保持挂载。切换 `.pen` 时先保存旧文档，再以新文件 URI
   重新初始化官方 editor，因为它的资源基准路径在初始化时固定；新打开文档的选区和撤销历史会重置。
 - 用户手工编辑每 6 秒触发保存；Agent 编辑逐次等待保存确认。

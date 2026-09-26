@@ -1,11 +1,11 @@
 {
   "name": "dsh-with-pencil-profile",
-  "version": "0.5.5",
+  "version": "0.6.0",
   "private": true,
   "description": "Development DSH Web profile with Pencil. Its repository-relative file dependency requires this source tree.",
   "dependencies": {
-    "@deepseek-ai/dsh-base": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-web-app": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-base": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-web-app": "0.1.7-rc.2",
     "dsh-with-pencil": "file:../.."
   },
   "dsh": {

@@ -23,7 +23,7 @@ before installing or distributing a working integration:
 
 - https://www.pen.dev/eula
 - https://www.pen.dev/terms-of-use
-- https://docs.pen.dev/for-developers/pencil-cli
+- https://docs.pen.dev/for-developers/pen-cli
 
 ## DeepSeek Harness
 

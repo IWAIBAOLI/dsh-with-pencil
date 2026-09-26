@@ -7,5 +7,4 @@ pnpm-lock.yaml
 .env.*
 !.env.example
 devdocs/
-docs/
 .dev-builds/

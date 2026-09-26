@@ -6,6 +6,26 @@ All notable changes to this project are documented here. Versions follow
 
 ## Unreleased
 
+## 0.6.0 - 2026-09-26
+
+- Target DeepSeek Harness `0.1.7-rc.2` and drop support for older Harness
+  releases. Update Node, peer dependencies, Client modules, and the development
+  installer to the new runtime.
+- Move the vision setting to the Host's volatile plugin Config and the new
+  Plugins row configuration page. Remove the retired settings-scope and LLM
+  provider registration workaround.
+- Default to native vision for DeepSeek-V4.1-Flash. Keep the high-resolution
+  translation-wrapper option and reject screenshot calls on routes that do not
+  declare image input; update the preset guidance for native screenshots.
+- Move the Pencil canvas into DSH's session-scoped right-Sidebar tab API. DSH now
+  owns docking, float, resize, and restored layouts. Duplicate tabs share one
+  editor, and close saves the canvas before its Host binding is released.
+- Replace browser-native file prompts with an inline dialog supported by the
+  DSH Web view. Creating a `.pen` file now writes an empty document immediately
+  and reports an existing path instead of silently switching to it.
+- Use DSH's paired button background and foreground theme tokens in file
+  dialogs so primary and delete actions remain readable in dark mode.
+
 ## 0.5.5 - 2026-08-28
 
 - Fix blank image fills after switching `.pen` files: use one session document

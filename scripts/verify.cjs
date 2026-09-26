@@ -50,6 +50,15 @@ try {
   if (integration.dependencies?.['@pen.dev/cli'] !== '0.3.0') {
     fail('@pen.dev/cli must stay pinned to schema-2.14-compatible version 0.3.0')
   } else ok('@pen.dev/cli is pinned to schema-2.14-compatible version 0.3.0')
+  const harnessVersion = readJson('profiles/dsh-with-pencil-template/package.json').dependencies['@deepseek-ai/dsh-base']
+  if (harnessVersion !== '0.1.7-rc.2' || readJson('profiles/dsh-with-pencil-template/package.json').dependencies['@deepseek-ai/dsh-web-app'] !== harnessVersion ||
+      Object.entries(integration.peerDependencies).some(([name, version]) => name.startsWith('@deepseek-ai/dsh-') && version !== harnessVersion)) {
+    fail('profile and all DSH peers must target 0.1.7-rc.2')
+  } else ok('profile and DSH peers target 0.1.7-rc.2')
+  if (integration.peerDependencies['@deepseek-ai/dsh-client-runtime'] || integration.dependencies.schemastery ||
+      !integration.dependencies['@deepseek-ai/schemastery'] || !integration.dsh.client.inject.includes('@deepseek-ai/dsh-client-ui-plugin-manager')) {
+    fail('plugin must use the new client modules and scoped schemastery')
+  } else ok('plugin uses the current Client modules and scoped schemastery')
 } catch (err) { fail('integration dependency versions: ' + err.message) }
 
 // 2. bundle structure
@@ -100,9 +109,11 @@ try {
     fail('bundle patch must insert { id: dsh-with-pencil, name: dsh-with-pencil }')
   } else ok('bundle patch inserts dsh-with-pencil row')
   const patch = patchText('cordis.patch.yml')
-  if (!patch.includes("inject: ['tools', 'llm', 'subprocess', 'sandboxPolicy', 'webServer', 'sessions', 'attachments', 'systemPrompt']") && !patch.includes('inject: ["tools", "llm", "subprocess", "sandboxPolicy", "webServer", "sessions", "attachments", "systemPrompt"]')) {
-    fail('bundle patch row must inject tool, process, web, session, attachment, and system-prompt services')
-  } else ok('bundle patch row injects tool, llm, process, web, session, attachment, and system-prompt services')
+  if (!patch.includes("inject: ['tools', 'subprocess', 'sandboxPolicy', 'webServer', 'sessions', 'attachments', 'systemPrompt', 'llm']") && !patch.includes('inject: ["tools", "subprocess", "sandboxPolicy", "webServer", "sessions", "attachments", "systemPrompt", "llm"]')) {
+    fail('bundle patch row must inject tool, process, web, session, attachment, system-prompt, and LLM services')
+  } else ok('bundle patch row injects tool, process, web, session, attachment, system-prompt, and LLM services')
+  if (!patch.includes('visionMode: multimodal')) fail('bundle patch must default to native vision')
+  else ok('bundle patch defaults to native vision')
 } catch (err) { fail('bundle patch: ' + err.message) }
 try {
   parseYaml('profiles/dsh-with-pencil-template/cordis.yml')
@@ -130,6 +141,10 @@ try {
   execFileSync(process.execPath, ['--check', pluginPath], { stdio: 'pipe' })
   pluginSource = fs.readFileSync(pluginPath, 'utf8')
   ok('lib/index.js parses as ESM')
+  if (!pluginSource.includes('.volatile()') || !pluginSource.includes('config.visionMode.get()') || !pluginSource.includes('  Config,\n  apply(') ||
+      pluginSource.includes('settings.register(') || pluginSource.includes('registerConfigurableProviders')) {
+    fail('Host vision mode must use live volatile Config without removed settings APIs')
+  } else ok('Host vision mode uses live volatile Config')
 } catch (err) {
   fail('lib/index.js: ' + (err.stderr ? err.stderr.toString() : err.message))
 }
@@ -206,36 +221,43 @@ try {
   if (!decl.inject || !decl.inject.includes('@deepseek-ai/dsh-client-locale') || !pkg.peerDependencies || !pkg.peerDependencies['@deepseek-ai/dsh-client-locale']) {
     fail('browser half must declare the Harness locale client service')
   } else ok('browser half declares the Harness locale client service')
+  if (!decl.inject.includes('@deepseek-ai/dsh-client-ui-sidebar-right') || !pkg.peerDependencies['@deepseek-ai/dsh-client-ui-sidebar-right'] || decl.inject.includes('@deepseek-ai/dsh-client-ui-layout')) {
+    fail('browser half must require the official right-Sidebar client service')
+  } else ok('browser half requires the official right-Sidebar service')
   const client = fs.readFileSync(path.join(root, 'lib/client.js'), 'utf8')
   clientSource = client
+  if (!client.includes("ctx.slots.inject('plugins.row.config'") || !client.includes("key: 'dsh-with-pencil#dsh-with-pencil'") ||
+      !client.includes('form.mutate(') || client.includes('settingsScope') || client.includes('settings.plugin.item')) {
+    fail('Client vision form must use the new plugin row configuration slot')
+  } else ok('Client vision form uses the plugin row configuration slot')
   if (!client.startsWith('window.__ModuleLoader__.load({')) fail('client bundle must start with the __ModuleLoader__.load wrap')
   else ok('client bundle wrapped for the web loader')
   if (client.includes('store.setOpen(true)')) fail('client must not auto-open the canvas during plugin activation')
   else ok('client does not auto-open the canvas')
-  if (!client.includes("fetch('/pen-host/bind'") || !client.includes('sessions.current')) {
-    fail('client must bind on demand and project the active Harness session')
-  } else ok('client binds on demand and follows the active session')
+  if (!client.includes("fetch('/pen-host/bind'") || !client.includes('function PencilTab(props)') || !client.includes('props.useTabInfo()') || !client.includes('props.useSessions((sessions) => sessions.byId[props.sessionId])')) {
+    fail('client must bind on demand inside its owning Sidebar Session tab')
+  } else ok('client binds on demand inside the owning Sidebar Session tab')
   if (!client.includes("ctx.slots.inject('conversation.input.right'") || !client.includes('summary.blank !== true')) {
     fail('blank conversations must expose an explicit input-bar canvas trigger')
   } else ok('blank conversations expose an explicit canvas trigger')
-  if (!client.includes('setPointerCapture(pointerId)') || !client.includes('html[data-penhost-pointer] .dsh-penhost-frame { pointer-events: none')) {
-    fail('canvas resize/drag must keep pointer ownership across the editor iframe')
-  } else ok('canvas resize/drag keeps pointer ownership across the editor iframe')
+  if (!client.includes("const PENCIL_TAB_KIND = 'dsh-with-pencil'") || !client.includes("ctx.sidebarRightTabs.register({") || !client.includes("keepMounted: true") || !client.includes("ctx.slots.inject('sidebar.right.pane.tab'") || !client.includes("ctx.slots.inject('sidebar.right.pane.tab.title'") || !client.includes('props.sidebarRight.openTab(PENCIL_TAB_KIND)') || client.includes("ctx.slots.inject('shell.overlay'") || client.includes('data-penhost-wide')) {
+    fail('canvas must use the official right-Sidebar tab and leave layout to DSH')
+  } else ok('canvas uses the official right-Sidebar tab and DSH layout')
+  if (!client.includes("ctx.sidebarRight.registerCloseHandler(PENCIL_TAB_KIND") || !client.includes("fetch('/pen-host/save?binding='") || !client.includes("fetch('/pen-host/unbind?binding='")) {
+    fail('closing a canvas tab must save before releasing its Host binding')
+  } else ok('canvas tab closure saves before releasing its Host binding')
   if (!client.includes('打开工作区文件夹') || !client.includes('新建 .pen 文件') || !client.includes('另存为…') || !client.includes('导出 PNG（2×）') || !client.includes('导出 PDF') || client.includes('当前会话 · 右侧分屏 · 自动保存')) {
     fail('canvas toolbar must expose concise workspace/file controls')
   } else ok('canvas toolbar exposes concise workspace/file controls')
   if (!client.includes('var(--dsw-specific-menu') || !client.includes('var(--dsw-shadow-lv3') || !client.includes('var(--dsw-alias-interactive-bg-hover') || client.includes('0 12px 32px rgba(0,0,0,.42)')) {
     fail('canvas dropdowns must use the resolved Harness menu surface and elevation tokens')
   } else ok('canvas dropdowns use the resolved Harness menu surface and elevation tokens')
-  if (!client.includes('function useHarnessLanguage(locale)') || !client.includes('locale.subscribe(listener)') || !client.includes('locale.getSnapshot()') || !client.includes("const inject = ['slots', 'locale', 'settingsScope']") || client.includes("attributeFilter: ['lang']") || !client.includes("openWorkspace: 'Open workspace folder'") || !client.includes("canvas: 'pen.dev Canvas'") || !client.includes("float: 'Float'")) {
+  if (!client.includes('function useHarnessLanguage(locale)') || !client.includes('locale.subscribe(listener)') || !client.includes('locale.getSnapshot()') || !client.includes("const inject = ['slots', 'locale', 'sidebarRight', 'sidebarRightTabs']") || client.includes("attributeFilter: ['lang']") || !client.includes("openWorkspace: 'Open workspace folder'") || !client.includes("canvas: 'pen.dev Canvas'")) {
     fail('all plugin-owned canvas controls must subscribe to the Harness locale service')
   } else ok('all plugin-owned canvas controls subscribe to the Harness locale service')
-  if (!client.includes('.dsh-penhost-control {') || !client.includes("const className = 'dsh-penhost-control dsh-penhost-header-btn'") || !client.includes("className: 'dsh-penhost-control dsh-penhost-mode'")) {
-    fail('conversation and canvas layout actions must share one compact control style')
-  } else ok('conversation and canvas layout actions share one compact control style')
-  if (!client.includes('DEFAULT_SPLIT_RATIO = 0.42') || !client.includes('ratio: width / viewport') || !client.includes('setViewportWidth(viewport)') || client.includes('wide: width')) {
-    fail('split canvas width must default smaller and follow viewport ratio')
-  } else ok('split canvas defaults to 42% and follows viewport ratio')
+  if (!client.includes('.dsh-penhost-control {') || !client.includes("const className = 'dsh-penhost-control dsh-penhost-header-btn'") || !client.includes("className: 'dsh-penhost-panel'")) {
+    fail('conversation trigger and Sidebar canvas must keep their compact controls')
+  } else ok('conversation trigger and Sidebar canvas keep compact controls')
   if (!client.includes("fetch('/pen-host/state?binding='") || !client.includes('key: state.binding') || client.includes('key: state.file || state.binding')) {
     fail('canvas iframe must stay mounted while agent-selected file labels synchronize')
   } else ok('canvas iframe stays mounted while agent-selected file labels synchronize')

@@ -1,7 +1,7 @@
 {
   "name": "dsh-with-pencil",
   "private": false,
-  "version": "0.5.5",
+  "version": "0.6.0",
   "description": "Session-aware Pencil integration for DeepSeek Harness with official MCP tools and an on-demand browser canvas.",
   "license": "MIT",
   "repository": {
@@ -41,7 +41,7 @@
     "mcp"
   ],
   "engines": {
-    "node": ">=22.15.0"
+    "node": "^22.19.0 || >=24.0.0"
   },
   "dsh": {
     "bundle": {
@@ -51,20 +51,22 @@
       "platform": "web",
       "inject": [
         "@deepseek-ai/dsh-client-locale",
-        "@deepseek-ai/dsh-client-runtime",
-        "@deepseek-ai/dsh-client-ui-conversation"
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-sidebar-right",
+        "@deepseek-ai/dsh-client-ui-plugin-manager"
       ]
     }
   },
   "dependencies": {
     "@pen.dev/cli": "0.3.0",
-    "schemastery": "^3.18.0"
+    "@deepseek-ai/schemastery": "~3.18.4"
   },
   "peerDependencies": {
-    "@deepseek-ai/dsh-client-locale": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-client-runtime": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-client-ui-conversation": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-tools": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-client-locale": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-client-ui-conversation": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-client-ui-sidebar-right": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-client-ui-plugin-manager": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-tools": "0.1.7-rc.2",
     "react": "^18.2.0"
   },
   "scripts": {

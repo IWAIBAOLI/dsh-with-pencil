@@ -13,7 +13,7 @@ const schemasteryFixture = new URL('./fixtures/schemastery.mjs', import.meta.url
 registerHooks({
   resolve(specifier, context, nextResolve) {
     if (specifier === '@deepseek-ai/dsh-tools') return { url: toolFixture, shortCircuit: true }
-    if (specifier === 'schemastery') return { url: schemasteryFixture, shortCircuit: true }
+    if (specifier === '@deepseek-ai/schemastery') return { url: schemasteryFixture, shortCircuit: true }
     return nextResolve(specifier, context)
   },
 })
@@ -34,6 +34,7 @@ const sessions = new Map([['canvas-agent', { header: { cwd: workspace } }]])
 let savedImages = 0
 let readImages = 0
 let beforeReadImage
+let activeModel = 'deepseek-flash'
 let headlessSpawns = 0
 // Screenshots now run on the shared headless engine (the webview screenshot
 // is a viewport image that ignores nodeId), so `subprocess.spawn` must answer
@@ -114,6 +115,12 @@ const webServer = {
 const ctx = {
   sessions: { get(sessionId) { return sessions.get(sessionId) } },
   get(name) {
+    if (name === 'llm') return {
+      async resolveModelInfo(provider, model) {
+        assert.equal(provider, 'deepseek-official')
+        return { inputModalities: model === 'deepseek-flash' ? ['text', 'image'] : ['text'] }
+      },
+    }
     if (name === 'subprocess') return { spawn(spec) { return headlessHandle(spec) } }
     if (name === 'sandboxPolicy') return { resolve: () => ({ workspaceRoot: workspace }) }
     if (name === 'webServer') return webServer
@@ -140,7 +147,8 @@ const ctx = {
 }
 
 const bridge = (await import(bridgeUrl.href + '?test=' + Date.now())).default
-bridge.apply(ctx)
+let visionMode = 'text'
+bridge.apply(ctx, { visionMode: { get: () => visionMode } })
 
 async function http(pathname, options = {}) {
   const exact = routes.get('exact:' + pathname)
@@ -300,7 +308,10 @@ async function fakeEditor() {
 const editorLoop = fakeEditor()
 const baseExec = {
   signal: new AbortController().signal,
-  agent: { session: { id: 'canvas-agent', header: { cwd: workspace } } },
+  agent: { session: {
+    id: 'canvas-agent', header: { cwd: workspace },
+    requestHeader() { return { config: { provider: 'deepseek-official', model: activeModel } } },
+  } },
 }
 
 async function call(name, args, exec = baseExec) {
@@ -409,6 +420,11 @@ try {
   await call('pencil_mcp_open', { filePath: 'two.pen' })
   assert.equal(JSON.parse(fs.readFileSync(path.join(workspace, 'one.pen'), 'utf8')).children[0].metadata.savedBeforeSwitch, true)
   assert.equal(fs.existsSync(path.join(workspace, 'two.pen')), false, 'switch must not save old content into the new file')
+  const createdFile = await http('/pen-host/file', { method: 'POST', query, body: { file: 'ui-new.pen', create: true } })
+  assert.equal(createdFile.status, 200, createdFile.text)
+  assert.deepEqual(diskState('ui-new.pen').names, [])
+  const duplicateFile = await http('/pen-host/file', { method: 'POST', query, body: { file: 'ui-new.pen', create: true } })
+  assert.equal(duplicateFile.status, 409, duplicateFile.text)
   await call('pencil_mcp_open', { filePath: 'one.pen' })
   const returnedContext = getSessionDocument('canvas-agent')
   assert.ok(returnedContext.revision > originalContext.revision)
@@ -436,8 +452,23 @@ try {
   const screenshot = await call('pencil_mcp_get_screenshot', { filePath: 'one.pen', nodeId: 'document' })
   assert.ok(exportNodeCalls > exportCallsBeforeScreenshot, 'document screenshots must export top-level nodes through the live canvas')
   assert.equal(screenshot.image.attachmentId, 'test-image-1')
+  assert.match(screenshot.image.instruction, /Visual-fidelity spot check/)
   const screenshotBlocks = tools.get('pencil_mcp_get_screenshot').output.render({}, screenshot)
   assert.equal(screenshotBlocks.some((block) => block.type === 'image'), true)
+  visionMode = 'multimodal'
+  const exportsBeforeMultimodal = exportNodeCalls
+  const nativeScreenshot = await call('pencil_mcp_get_screenshot', { filePath: 'one.pen', nodeId: 'document' })
+  assert.equal(exportNodeCalls, exportsBeforeMultimodal, 'volatile multimodal mode must use native screenshots immediately')
+  assert.equal(nativeScreenshot.image.attachmentId, 'test-image-2')
+  assert.equal(nativeScreenshot.image.instruction, undefined)
+  activeModel = 'custom-text'
+  await assert.rejects(
+    tools.get('pencil_mcp_get_screenshot').execute({ filePath: 'one.pen', nodeId: 'document' }, baseExec),
+    /model "custom-text" does not declare it/,
+  )
+  assert.equal(savedImages, 2, 'unsupported routes must fail before rendering or saving an image')
+  activeModel = 'deepseek-flash'
+  visionMode = 'text'
   assert.deepEqual(
     fs.readdirSync(workspace).filter((f) => f.startsWith('.pen-doc-') || f.startsWith('.pen-shot-')),
     [],
@@ -465,7 +496,7 @@ try {
   const state = await http('/pen-host/state', { query })
   assert.equal(state.json().connected, true)
   assert.ok(headlessSpawns > 0, 'screenshots must run on the headless engine')
-  assert.equal(savedImages, 1)
+  assert.equal(savedImages, 2)
   assert.equal(canvasMutations, 3)
   assert.equal(liveFile, path.join(workspace, 'one.pen'))
 

@@ -20,7 +20,10 @@ function dryRun(relative, required, allowed) {
   assert.ok(result, relative + ' did not produce npm pack metadata')
   const files = result.files.map((item) => item.path)
   for (const file of required) assert.ok(files.includes(file), relative + ' is missing ' + file)
-  for (const file of files) assert.match(file, allowed, relative + ' includes unexpected file ' + file)
+  for (const entry of result.files) {
+    assert.match(entry.path, allowed, relative + ' includes unexpected file ' + entry.path)
+    assert.equal(entry.mode & 0o444, 0o444, relative + ' packages an unreadable file ' + entry.path)
+  }
   assert.deepEqual(result.bundled || [], [], relative + ' must not bundle official or third-party dependencies')
   console.log(relative + ': ' + result.filename + ', ' + result.entryCount + ' files, no bundled dependencies')
 }

@@ -1,16 +1,17 @@
-// Minimal schemastery stand-in for tests: the plugin only uses z.object with
-// .string()/.default()/.description() when declaring its config schema.
+// Minimal stand-in for the DSH Config schema used by the Host tests.
 const z = {
   object(schema) { return { __schema: schema } },
   union(values) {
     const chain = { type: 'union', values: Array.from(values) }
     chain.default = () => chain
+    chain.volatile = () => chain
     chain.description = () => chain
     return chain
   },
   string() {
     const chain = { type: 'string' }
     chain.default = () => chain
+    chain.volatile = () => chain
     chain.description = () => chain
     return chain
   },
