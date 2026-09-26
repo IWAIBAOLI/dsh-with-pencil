@@ -24,24 +24,29 @@ while libraries without `dsh.bundle` are ordinary implementation dependencies.
 
 The public package name is `dsh-with-pencil` and the source repository is
 `IWAIBAOLI/dsh-with-pencil`. Before publishing any release, complete these
-remaining manual gates:
+manual checks:
 
 1. Recheck npm name availability, sign in to the publishing account and enable
    two-factor authentication or trusted publishing.
 2. Recheck the current pen.dev terms for this integration's use of the official
    CLI and user-initiated editor download. Do not copy either official artifact
    into this repository or npm tarball.
-3. Confirm the pinned editor URL and SHA-256 against
-   `https://api.pen.dev/public/versions`; a changed artifact requires a new
-   plugin release and the full editor compatibility suite.
-4. Move to an official `@pen.dev/cli` release whose image stack includes a
-   patched Sharp/libvips version, or obtain written vendor guidance for the
-   pinned version. As checked on 2026-09-26, `@pen.dev/cli@0.3.0` declares
-   `sharp@^0.34.5`, which is in the affected range of
-   [GHSA-f88m-g3jw-g9cj](https://github.com/lovell/sharp/security/advisories/GHSA-f88m-g3jw-g9cj).
-   Do not force a transitive Sharp override without rerunning the
-   editor/render/export compatibility suite.
-5. Enable private vulnerability reporting for the repository.
+3. Confirm the pinned editor version and URL against
+   `https://api.pen.dev/public/versions`. The API does not publish a SHA-256;
+   compare the pinned digest with the previously verified official editor
+   cache metadata. A changed artifact requires a new plugin release and the
+   full editor compatibility suite.
+
+For 0.6.0, the project owner accepted the upstream `@pen.dev/cli` image-stack
+risk on 2026-09-26. Its pinned `sharp@^0.34.5` is within the affected range of
+[GHSA-f88m-g3jw-g9cj](https://github.com/lovell/sharp/security/advisories/GHSA-f88m-g3jw-g9cj).
+The inspected CLI calls Sharp for CLI prompt-file image attachments; the
+plugin's regular canvas/MCP route does not call that path. Track official CLI
+updates and retest before changing the pin. Do not force a transitive Sharp
+override without rerunning the editor/render/export compatibility suite.
+
+Enable private vulnerability reporting for the repository when repository
+settings access is available.
 
 `npm run release:check` enforces the machine-checkable package, repository,
 worktree and tarball gates; the items above still require a human decision.
