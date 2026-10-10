@@ -1,8 +1,44 @@
-# DSH 0.1.7-rc.2 适配核对
+# DSH 升级适配核对
+
+## DSH 0.2.0-rc.2 — 2026-10-10
+
+插件 `0.7.0` 精确面向默认发行线 `0.2.0-rc.2`。本次比较上游标签 `dsh-v0.1.7-rc.2` 与 `dsh-v0.2.0-rc.2`（`639ed015397290b3745d163aafe02ffee4aa3f84`），覆盖两次 `0.2.0` RC 更新。所有 DSH peer、开发 Profile、开发安装器使用的目标版本和中英文安装命令均对齐 `0.2.0-rc.2`。
+
+| 与插件有关的更新 | 本项目核对结果 |
+|---|---|
+| 右侧栏导航改为对当前屏幕会话的 adopted store 操作；`mounted` 在 React 渲染之前随会话选择更新。移除内部 `SidebarRightBinding` 导出。 | 插件通过 `mounted` 订阅判断入口是否可用，并使用 `openTab`、`openTabs`、`registerCloseHandler`、`keepMounted` 和官方页签槽。未使用已移除的绑定接口；按槽传入的 `sessionId` 管理画布和关闭保存。 |
+| 插件管理器改进安装状态、刷新提示和保存交互。 | `plugins.row.config` 的键、配置表单 `state` 和带 revision 的 `mutate` 接口保留，现有 `visionMode` 配置无需迁移。 |
+| 会话输入草稿和提交流程调整。 | `conversation.session.header.actions` 和 `conversation.input.right` 保留；插件未调用草稿编辑器内部接口。 |
+| 工具调用恢复和 DeepSeek 过期图片重新上传。 | `defineTool`、工具参数及结果声明、`attachments.saveImage/readImage`、`ImageBlock` 和模型图片能力查询接口保留，截图与聊天原图插入继续使用这些公共接口。 |
+| 桌面登录 Shell 环境继承、内置 DSH CLI 和主题按钮改进。 | 这些行为由 Harness 提供；插件继续使用 subprocess 服务和成对的主题按钮颜色。 |
+
+默认视觉模式继续为 `multimodal`。目标版本的默认 `deepseek-flash` 模型声明文字和图片输入；`deepseek-v4-pro` 未声明图片输入，截图仍按实际路由能力检查。此次不引入 `0.2.1-alpha` 的工作目录、反向代理路径前缀或字体接口。
+
+核对来源：
+
+- [DSH 0.2.0-rc.1 发布说明](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.0-rc.1)
+- [DSH 0.2.0-rc.2 发布说明](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.0-rc.2)
+- [目标版本右侧栏扩展契约](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.0-rc.2/packages/client/ui-sidebar-right/README.md)
+- [目标版本插件配置扩展契约](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.0-rc.2/packages/client/ui-plugin-manager/README.md)
+- [目标版本默认模型目录](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.0-rc.2/packages/llm/llm-deepseek/src/models.ts)
+
+验证记录：
+
+- `npm test`：13 项检查全部通过，包括客户端配置/侧栏契约夹具、Host 画布保存与路由、文档切换、聊天图片、资源导入、开发打包和发布文件检查。
+- npm 包共 23 个文件，包含全部运行模块和必要文档，没有打入依赖、官方编辑器、Profile、测试目录或本地缓存。
+- `git diff --check`：通过；`node_modules`、锁文件、开发 tarball 和测试缓存继续排除在 Git/发行包之外。
+- 自动回归阶段复用本机 `dsh-tools@0.1.7-rc.2` 和 `schemastery@3.18.4`，未安装或重新下载依赖。上述公共接口文件已与目标标签逐文件核对一致；客户端侧栏检查使用契约夹具。
+- 按用户要求补做简单真实 Web 验收：隔离 `DSH_HOME` 使用官方 `0.2.0-rc.2` npm 运行产物，获取本机缺少的 Harness 运行模块，并复用已有第三方依赖、Pencil CLI 和编辑器缓存。待发布 tarball 的插件快照成功注册 9 个 Pencil 工具。
+- 浏览器确认会话入口打开官方右侧栏的画布和编辑器；在外置 SSD 工作区新建 `designs/smoke-070.pen`，磁盘立即出现 schema `2.14` 的文件。关闭画布后重开，恢复相同文件并建立新的绑定。
+- 插件配置页显示 `v0.7.0` 且默认选中“原生视觉模型”；切换图像转译选项保存成功，再重置回原生视觉。未发起模型请求。
+- 复用依赖的临时环境有 OTel 与 office-to-pdf 未加载的提示，不影响上述 Pencil 验收；本轮没有扩展到这些组件或完整 DSH 功能矩阵。
+- 临时运行环境、测试目录及 npm 缓存均放在外置 SSD，验收服务已停止；收尾时清理临时目录，保留一张忽略入库的验收截图。既有用户 Profile 未改动。
+
+## DSH 0.1.7-rc.2 — 2026-09-26
 
 核对日期：2026-09-26。插件原版 `0.5.5` 声明 `^0.1.0-rc.6` 依赖；本次 `0.6.0` 精确面向 `0.1.7-rc.2`，不维持旧版 Harness 兼容。上游仓库已经拉取到 `dsh-v0.1.7-rc.2`（`477b4f4205`），该标签与当时的 `origin/master` 一致。对应 npm 右侧栏包 `@deepseek-ai/dsh-client-ui-sidebar-right@0.1.7-rc.2` 已发布。
 
-## 与插件直接相关的变化
+### 与插件直接相关的变化
 
 | 上游变化 | 核对结果与本项目动作 |
 |---|---|
@@ -14,7 +50,7 @@
 | Web 新增空白会话输入栏扩展槽及会话页头动作；工具可在进行中会话动态更新。 | 保留 `conversation.input.right` 的空白会话入口和 `conversation.session.header.actions` 的普通入口；两者调用官方 `openTab('dsh-with-pencil')`。工具继续由 `ctx.tools.register` 注册并在卸载时注销。 |
 | 附件历史只从声明的事件内容发现；Remote 文件读取迁到 `readBytes`；`agent/session-start` 变为 `agent/created`。 | 截图返回声明的 ImageBlock 附件，聊天原图从 `agent/pre-step` 的消息内容采集；插件不使用旧 Remote 文件读取或 `agent/session-start`，无需迁移这些接口。 |
 
-## 核对来源
+### 核对来源
 
 - [DSH 0.1.5-rc.1 跨版本发布说明](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.1.5-rc.1)
 - [DSH 0.1.7-rc.1 跨版本发布说明](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.1.7-rc.1)
@@ -23,7 +59,7 @@
 - [默认 DeepSeek 模型目录](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.1.7-rc.2/packages/llm/llm-deepseek/src/models.ts)
 - [插件配置页扩展契约](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.1.7-rc.2/packages/client/ui-plugin-manager/README.md)
 
-## 验证
+### 验证
 
 - `npm test`：静态检查、打包内容、Client 右侧栏注册/绑定/关闭检查、Host/画布集成测试通过。
 - `git diff --check`：通过。

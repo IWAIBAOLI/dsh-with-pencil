@@ -6,6 +6,17 @@ All notable changes to this project are documented here. Versions follow
 
 ## Unreleased
 
+## 0.7.0 - 2026-10-10
+
+- Target the default DeepSeek Harness release `0.2.0-rc.2` exclusively. Pin all
+  DSH peers and the development profile to this version and update the English
+  and Chinese installation commands.
+- Review the new Sidebar session selection lifecycle and the retained plugin
+  configuration, conversation action, tool, and image attachment APIs. The
+  existing native Sidebar and vision integration uses these supported APIs.
+- Keep native vision as the default and preserve existing `visionMode`
+  configuration. Record the source review separately from runtime acceptance.
+
 ## 0.6.0 - 2026-09-26
 
 - Target DeepSeek Harness `0.1.7-rc.2` and drop support for older Harness

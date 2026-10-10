@@ -136,20 +136,21 @@ themselves.
 
 ### Install
 
-Version `0.6.0` targets Harness `0.1.7-rc.2` only. Configure `visionMode`
-again in the new Plugins page after upgrading from an older Harness.
+Version `0.7.0` targets Harness `0.2.0-rc.2` only. Existing `0.6.0`
+`visionMode` settings continue to work. When migrating from `0.5.x` or older,
+configure `visionMode` again in the Plugins page.
 
-After `0.6.0` is published, install the npm bundle into a DeepSeek Harness
-`0.1.7-rc.2` Web profile:
+Install the npm bundle into a DeepSeek Harness
+`0.2.0-rc.2` Web profile:
 
 ```bash
-npx @deepseek-ai/dsh@0.1.7-rc.2 plugin --profile web add dsh-with-pencil@0.6.0
+npx @deepseek-ai/dsh@0.2.0-rc.2 plugin --profile web add dsh-with-pencil@0.7.0
 ```
 
 Restart DSH Web after installation (`Ctrl-C` the running process first):
 
 ```bash
-npx @deepseek-ai/dsh@0.1.7-rc.2 web
+npx @deepseek-ai/dsh@0.2.0-rc.2 web
 ```
 
 That is the complete normal installation. The npm bundle installs the pinned
@@ -167,7 +168,7 @@ For local development from this checkout:
 
 ```bash
 npm run dev:install -- --profile web
-npx @deepseek-ai/dsh@0.1.7-rc.2 web
+npx @deepseek-ai/dsh@0.2.0-rc.2 web
 ```
 
 `dev:install` runs the complete test suite, packs the exact publishable files
@@ -355,19 +356,19 @@ Profile 已显式保存 `text`，请点**重置为默认**切回原生视觉。�
 
 ### 安装
 
-`0.6.0` 仅支持 Harness `0.1.7-rc.2`。从旧版 Harness 升级后，请在新版插件页重新设置
-`visionMode`。
+`0.7.0` 仅支持 Harness `0.2.0-rc.2`。已有的 `0.6.0` `visionMode` 配置继续有效。
+从 `0.5.x` 或更早的插件版本升级时，请在插件页重新设置 `visionMode`。
 
-`0.6.0` 发布后，在已有 DeepSeek Harness `0.1.7-rc.2` Web profile 中安装 npm Bundle：
+在已有 DeepSeek Harness `0.2.0-rc.2` Web profile 中安装 npm Bundle：
 
 ```bash
-npx @deepseek-ai/dsh@0.1.7-rc.2 plugin --profile web add dsh-with-pencil@0.6.0
+npx @deepseek-ai/dsh@0.2.0-rc.2 plugin --profile web add dsh-with-pencil@0.7.0
 ```
 
 安装完成后重启 DSH Web（先用 `Ctrl-C` 停止正在运行的进程）：
 
 ```bash
-npx @deepseek-ai/dsh@0.1.7-rc.2 web
+npx @deepseek-ai/dsh@0.2.0-rc.2 web
 ```
 
 这就是正常情况下的完整安装步骤。npm Bundle 会安装固定版本的官方 `@pen.dev/cli`。
@@ -383,7 +384,7 @@ npm 包本身不复制或再分发 browser editor。离线环境可以预先下�
 
 ```bash
 npm run dev:install -- --profile web
-npx @deepseek-ai/dsh@0.1.7-rc.2 web
+npx @deepseek-ai/dsh@0.2.0-rc.2 web
 ```
 
 `dev:install` 会先运行完整测试，再把实际可发布文件打成文件名带内容哈希的唯一 tarball，

@@ -205,4 +205,4 @@ dispose()
 assert.equal(entries.size, 0)
 assert.equal(tabDefinition, undefined)
 globalThis.fetch = originalFetch
-console.log('DSH 0.1.7-rc.2 Client form and native Sidebar tab: ok')
+console.log('Client config form and native Sidebar tab (contract fixtures): ok')

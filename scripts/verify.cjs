@@ -51,10 +51,10 @@ try {
     fail('@pen.dev/cli must stay pinned to schema-2.14-compatible version 0.3.0')
   } else ok('@pen.dev/cli is pinned to schema-2.14-compatible version 0.3.0')
   const harnessVersion = readJson('profiles/dsh-with-pencil-template/package.json').dependencies['@deepseek-ai/dsh-base']
-  if (harnessVersion !== '0.1.7-rc.2' || readJson('profiles/dsh-with-pencil-template/package.json').dependencies['@deepseek-ai/dsh-web-app'] !== harnessVersion ||
+  if (harnessVersion !== '0.2.0-rc.2' || readJson('profiles/dsh-with-pencil-template/package.json').dependencies['@deepseek-ai/dsh-web-app'] !== harnessVersion ||
       Object.entries(integration.peerDependencies).some(([name, version]) => name.startsWith('@deepseek-ai/dsh-') && version !== harnessVersion)) {
-    fail('profile and all DSH peers must target 0.1.7-rc.2')
-  } else ok('profile and DSH peers target 0.1.7-rc.2')
+    fail('profile and all DSH peers must target 0.2.0-rc.2')
+  } else ok('profile and DSH peers target 0.2.0-rc.2')
   if (integration.peerDependencies['@deepseek-ai/dsh-client-runtime'] || integration.dependencies.schemastery ||
       !integration.dependencies['@deepseek-ai/schemastery'] || !integration.dsh.client.inject.includes('@deepseek-ai/dsh-client-ui-plugin-manager')) {
     fail('plugin must use the new client modules and scoped schemastery')
