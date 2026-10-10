@@ -1,4 +1,17 @@
 import assert from 'node:assert/strict'
+import { registerHooks } from 'node:module'
+
+// Keep this contract test runnable without installed Harness packages, just
+// like live-canvas.test.mjs. Real Harness integration is checked separately.
+const toolFixture = new URL('./fixtures/dsh-tools.mjs', import.meta.url).href
+const schemasteryFixture = new URL('./fixtures/schemastery.mjs', import.meta.url).href
+registerHooks({
+  resolve(specifier, context, nextResolve) {
+    if (specifier === '@deepseek-ai/dsh-tools') return { url: toolFixture, shortCircuit: true }
+    if (specifier === '@deepseek-ai/schemastery') return { url: schemasteryFixture, shortCircuit: true }
+    return nextResolve(specifier, context)
+  },
+})
 
 const { Config, default: host } = await import('../lib/index.js')
 assert.equal(host.Config, Config)
