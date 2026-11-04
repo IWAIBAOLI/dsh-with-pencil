@@ -136,21 +136,21 @@ themselves.
 
 ### Install
 
-Version `0.7.0` targets Harness `0.2.0-rc.2` only. Existing `0.6.0`
+Version `0.8.0` (next release) targets Harness `0.2.1-rc.5` only. Existing `0.6.0` and `0.7.0`
 `visionMode` settings continue to work. When migrating from `0.5.x` or older,
 configure `visionMode` again in the Plugins page.
 
 Install the npm bundle into a DeepSeek Harness
-`0.2.0-rc.2` Web profile:
+`0.2.1-rc.5` Web profile:
 
 ```bash
-npx @deepseek-ai/dsh@0.2.0-rc.2 plugin --profile web add dsh-with-pencil@0.7.0
+npx @deepseek-ai/dsh@0.2.1-rc.5 plugin --profile web add dsh-with-pencil@0.8.0
 ```
 
 Restart DSH Web after installation (`Ctrl-C` the running process first):
 
 ```bash
-npx @deepseek-ai/dsh@0.2.0-rc.2 web
+npx @deepseek-ai/dsh@0.2.1-rc.5 web
 ```
 
 That is the complete normal installation. The npm bundle installs the pinned
@@ -168,7 +168,7 @@ For local development from this checkout:
 
 ```bash
 npm run dev:install -- --profile web
-npx @deepseek-ai/dsh@0.2.0-rc.2 web
+npx @deepseek-ai/dsh@0.2.1-rc.5 web
 ```
 
 `dev:install` runs the complete test suite, packs the exact publishable files
@@ -183,6 +183,9 @@ and `pen-dev-bridge` first so the same canvas routes are not registered twice.
 
 The development-only profile fixture is available at
 `profiles/dsh-with-pencil-template/`.
+
+Pencil remains bound to the original session project directory. Changing the current
+working directory with `working_directory` keeps that project and the open canvas unchanged.
 
 ### Environment variables
 
@@ -356,19 +359,19 @@ Profile 已显式保存 `text`，请点**重置为默认**切回原生视觉。�
 
 ### 安装
 
-`0.7.0` 仅支持 Harness `0.2.0-rc.2`。已有的 `0.6.0` `visionMode` 配置继续有效。
+`0.8.0`（待发布）仅支持 Harness `0.2.1-rc.5`。已有的 `0.6.0`、`0.7.0` `visionMode` 配置继续有效。
 从 `0.5.x` 或更早的插件版本升级时，请在插件页重新设置 `visionMode`。
 
-在已有 DeepSeek Harness `0.2.0-rc.2` Web profile 中安装 npm Bundle：
+在已有 DeepSeek Harness `0.2.1-rc.5` Web profile 中安装 npm Bundle：
 
 ```bash
-npx @deepseek-ai/dsh@0.2.0-rc.2 plugin --profile web add dsh-with-pencil@0.7.0
+npx @deepseek-ai/dsh@0.2.1-rc.5 plugin --profile web add dsh-with-pencil@0.8.0
 ```
 
 安装完成后重启 DSH Web（先用 `Ctrl-C` 停止正在运行的进程）：
 
 ```bash
-npx @deepseek-ai/dsh@0.2.0-rc.2 web
+npx @deepseek-ai/dsh@0.2.1-rc.5 web
 ```
 
 这就是正常情况下的完整安装步骤。npm Bundle 会安装固定版本的官方 `@pen.dev/cli`。
@@ -384,7 +387,7 @@ npm 包本身不复制或再分发 browser editor。离线环境可以预先下�
 
 ```bash
 npm run dev:install -- --profile web
-npx @deepseek-ai/dsh@0.2.0-rc.2 web
+npx @deepseek-ai/dsh@0.2.1-rc.5 web
 ```
 
 `dev:install` 会先运行完整测试，再把实际可发布文件打成文件名带内容哈希的唯一 tarball，
@@ -394,6 +397,9 @@ npx @deepseek-ai/dsh@0.2.0-rc.2 web
 `pen-dev-bridge`，避免相同画布路由被注册两次。
 
 开发用 profile 模板位于 `profiles/dsh-with-pencil-template/`。
+
+Pencil 始终绑定会话的原始工程目录。通过 `working_directory` 切换当前执行目录时，
+原工程和已打开的画布保持不变。
 
 ### 环境变量
 

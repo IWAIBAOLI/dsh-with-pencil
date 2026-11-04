@@ -6,6 +6,17 @@ All notable changes to this project are documented here. Versions follow
 
 ## Unreleased
 
+## 0.8.0 - 2026-11-04
+
+- Target the default DeepSeek Harness release `0.2.1-rc.5` exclusively; align
+  all DSH peers, the development profile, validation, and installation commands.
+- Preserve canvas selection context literally with `interpolate: false`, so
+  template-like node names are not expanded as Harness prompt variables.
+- Clarify that Pencil paths stay relative to the original session project;
+  the new `working_directory` tool changes execution cwd independently.
+- Retain the native Sidebar, revision-fenced configuration form, and native
+  vision defaults after reviewing the `0.2.1` public extension contracts.
+
 ## 0.7.0 - 2026-10-10
 
 - Target the default DeepSeek Harness release `0.2.0-rc.2` exclusively. Pin all

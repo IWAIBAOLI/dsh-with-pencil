@@ -1,5 +1,48 @@
 # DSH 升级适配核对
 
+## DSH 0.2.1-rc.5 — 2026-11-04
+
+核对 npm dist-tags：`latest`、`next` 均为 `0.2.1-rc.5`，npm 发布于
+2026-10-29；GitHub 同名 Release 仍标记为 Pre-release。`0.2.2-alpha.3`
+属于 alpha 发行线。本次插件 `0.8.0` 准备对齐默认发行线，不包含 alpha 适配，
+不继续声明旧 Harness 的兼容性。
+
+上游已拉取标签，比较 `dsh-v0.2.0-rc.2` 与 `dsh-v0.2.1-rc.5`
+（`b830ec950faba0a46dda564be3e2d854afed94f1`），覆盖 `0.2.1` 的 alpha
+和 RC 累积更新。未安装或重新下载第三方运行依赖。
+
+| 与 Pencil 有关的变化 | 适配结果 |
+|---|---|
+| 插件更新/热重载、发现页和安装诊断改进；插件配置新增周边扩展槽。 | 保留 `plugins.row.config` 和带 revision 的表单更新接口；安装仍声明精确的 DSH peers，卸载时释放注册。 |
+| 右侧栏完善多页签、引导页、快捷键和焦点恢复。 | 核对 `mounted`、`openTabs`、`openTab`、`registerCloseHandler`、`keepMounted` 及页签槽，插件使用的公共接口保留。引导页扩展无需替代现有会话入口。 |
+| 新增独立的 `workingDirectory` 服务和 `working_directory` 工具。会话投影存放执行目录，`header.cwd` 继续标识原工程，沙箱授权边界独立保留。 | Pencil 继续绑定原始会话工程，模型路径说明和中英文文档明确这个语义；切换执行目录不重绑定画布或迁移现有文档。 |
+| 系统提示上下文支持 `interpolate: false`，并可在请求准入时刷新已注册的动态事实。 | 画布选区上下文设置 `interpolate: false`，保持节点名中的 `{{...}}` 原文；增加回归断言。 |
+| 图片请求目标、尺寸/字节投影和目录能力处理改进。 | `attachments.saveImage/readImage` 与 `llm.resolveModelInfo` 接口保留，截图仍返回 ImageBlock，并按实际路由检查图片能力。Flash 仍声明图片输入，Pro 未声明；默认继续为原生视觉。 |
+| 新增会话记录接口；移除运行时 invariant 子插件及其导出；输入区统计扩展拆分。 | 本插件未使用这些旧诊断入口、统计槽或内部记录接口，无需迁移。 |
+| Node、Cordis 和 schema 依赖随发行线更新。 | Node 要求仍为 `^22.19.0 || >=24.0.0`；Host 仍使用公开 Config API，现有 `~3.18.4` 范围允许上游的 `3.18.5`。 |
+
+源码核对与契约测试不等同于真实 Web 运行验收；本次不复用此前
+`0.2.0-rc.2` 的截图作为 `0.2.1-rc.5` 的验收证据。
+
+验证记录：
+
+- npm 中五个目标 DSH peer 的 `0.2.1-rc.5` 均已存在；插件 `0.8.0` 尚未发布。
+- Node `24.12.0`：从 Git 源码快照建立不含 `node_modules` 的临时目录，
+  禁用 npm 网络访问，运行 `npm test`，13 项检查全部通过。
+- 新增选区中的 `{{selection_name}}` 原文和 `interpolate: false` 回归断言。
+- 打包检查仍为 23 个文件，依赖、测试、Profile 和编辑器缓存未进入 npm 包。
+- 临时测试目录与 npm 缓存均位于外置 SSD，并已清理；既有用户 Profile 未改动。
+- 本次未启动真实 `0.2.1-rc.5` Web 环境，运行时兼容性仍需真实 Web 验收。
+
+来源：
+
+- [默认 npm 发行线](https://registry.npmjs.org/@deepseek-ai%2fdsh)
+- [0.2.1 首个 RC 的累积发布说明](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.1-rc.1)
+- [0.2.1-rc.5 发布说明](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.1-rc.5)
+- [工作目录服务](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.1-rc.5/packages/session/working-directory/README.md)
+- [侧边栏契约](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.1-rc.5/packages/client/ui-sidebar-right/README.md)
+- [上下文渲染接口](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.1-rc.5/packages/core/system-prompt/src/index.ts)
+
 ## DSH 0.2.0-rc.2 — 2026-10-10
 
 插件 `0.7.0` 精确面向默认发行线 `0.2.0-rc.2`。本次比较上游标签 `dsh-v0.1.7-rc.2` 与 `dsh-v0.2.0-rc.2`（`639ed015397290b3745d163aafe02ffee4aa3f84`），覆盖两次 `0.2.0` RC 更新。所有 DSH peer、开发 Profile、开发安装器使用的目标版本和中英文安装命令均对齐 `0.2.0-rc.2`。

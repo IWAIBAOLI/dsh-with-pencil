@@ -373,7 +373,7 @@ try {
   }
   assert.deepEqual(diskState('one.pen').names, ['Hero', 'Features', 'Footer'])
 
-  selectedElements = [liveDocument.children[0], liveDocument.children[2]]
+  selectedElements = [{ ...liveDocument.children[0], name: 'Hero {{selection_name}}' }, liveDocument.children[2]]
   const assembly = { contexts: [] }
   let continued = false
   await eventHandlers.get('system-prompt/assemble')(
@@ -384,7 +384,8 @@ try {
   assert.equal(continued, true)
   assert.equal(assembly.contexts.length, 1)
   assert.equal(assembly.contexts[0].name, 'pen-dev:selection')
-  assert.match(assembly.contexts[0].text, /`node-1` \(frame\): Hero/)
+  assert.equal(assembly.contexts[0].interpolate, false)
+  assert.match(assembly.contexts[0].text, /`node-1` \(frame\): Hero \{\{selection_name\}\}/)
   assert.match(assembly.contexts[0].text, /`node-3` \(frame\): Footer/)
   selectedElements = []
 
