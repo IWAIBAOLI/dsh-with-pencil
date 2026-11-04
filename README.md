@@ -136,7 +136,7 @@ themselves.
 
 ### Install
 
-Version `0.8.0` (next release) targets Harness `0.2.1-rc.5` only. Existing `0.6.0` and `0.7.0`
+Version `0.8.0` targets Harness `0.2.1-rc.5` only. Existing `0.6.0` and `0.7.0`
 `visionMode` settings continue to work. When migrating from `0.5.x` or older,
 configure `visionMode` again in the Plugins page.
 
@@ -359,7 +359,7 @@ Profile 已显式保存 `text`，请点**重置为默认**切回原生视觉。�
 
 ### 安装
 
-`0.8.0`（待发布）仅支持 Harness `0.2.1-rc.5`。已有的 `0.6.0`、`0.7.0` `visionMode` 配置继续有效。
+`0.8.0` 仅支持 Harness `0.2.1-rc.5`。已有的 `0.6.0`、`0.7.0` `visionMode` 配置继续有效。
 从 `0.5.x` 或更早的插件版本升级时，请在插件页重新设置 `visionMode`。
 
 在已有 DeepSeek Harness `0.2.1-rc.5` Web profile 中安装 npm Bundle：
